@@ -119,7 +119,9 @@ fn decode_loop(
 
     let mut speed = initial_speed;
     let mut looping = false;
-    let mut paused = false;
+    // Start paused — the engine's initial state is is_playing=false.
+    // The decoder blocks here until the frontend calls play().
+    let mut paused = true;
     let mut resampler: Option<SpeedResampler> = if (speed - 1.0).abs() > 1e-6 {
         Some(SpeedResampler::new(channels, speed))
     } else {
@@ -287,8 +289,46 @@ fn decode_loop(
         }
 
         // Write to the ring buffer, back-pressuring if full.
+        // Check for control messages while waiting so Pause/Seek/Stop are
+        // never blocked by a full buffer.
         let mut offset = 0;
         while offset < samples_to_write.len() {
+            // Drain any pending control messages before sleeping.
+            loop {
+                match control_rx.try_recv() {
+                    Ok(ControlMsg::Pause) => {
+                        paused = true;
+                        state.set_is_playing(false);
+                    }
+                    Ok(ControlMsg::Stop) => return Ok(()),
+                    Ok(ControlMsg::Seek(ms)) => {
+                        let time = Time::from(ms as f64 / 1000.0);
+                        let _ = probed.format.seek(
+                            SeekMode::Accurate,
+                            SeekTo::Time { time, track_id: Some(track_id) },
+                        );
+                        decoder.reset();
+                        if let Some(r) = &mut resampler { r.flush(); }
+                        state.set_position_ms(ms as f64);
+                        // Discard the current decoded chunk and re-enter the outer loop.
+                        offset = samples_to_write.len();
+                    }
+                    Ok(ControlMsg::SetSpeed(new_speed)) => {
+                        speed = new_speed;
+                        resampler = if (speed - 1.0).abs() < 1e-6 {
+                            None
+                        } else {
+                            Some(SpeedResampler::new(channels, speed))
+                        };
+                    }
+                    Ok(ControlMsg::SetLoop(e)) => looping = e,
+                    Ok(ControlMsg::Play) => {} // already playing
+                    Err(_) => break,
+                }
+            }
+            if paused || offset >= samples_to_write.len() {
+                break;
+            }
             let free = producer.slots();
             if free == 0 {
                 std::thread::sleep(std::time::Duration::from_millis(1));
