@@ -11,9 +11,8 @@ pub struct MarkerStore {
     /// Segment titles keyed by the anchor marker's ID.
     /// Anchor = the `Start` marker in a Start/End pair, or a `StartEnd` marker.
     /// `End` markers never have an entry here.
+    /// Only populated when the user explicitly renames a segment.
     titles: HashMap<Uuid, String>,
-    /// Counter for auto-generating "NNN Segment" titles.
-    next_number: u32,
 }
 
 impl MarkerStore {
@@ -21,20 +20,12 @@ impl MarkerStore {
         Self {
             markers: Vec::new(),
             titles: HashMap::new(),
-            next_number: 1,
         }
     }
 
     /// Add a marker at `position` ms with the given kind.
-    /// `Start` and `StartEnd` markers automatically receive a title entry.
     pub fn add(&mut self, position: u64, kind: MarkerKind) -> Marker {
         let marker = Marker { id: Uuid::new_v4(), position, kind };
-
-        if matches!(kind, MarkerKind::Start | MarkerKind::StartEnd) {
-            let title = format!("{:03} Segment", self.next_number);
-            self.next_number += 1;
-            self.titles.insert(marker.id, title);
-        }
 
         // Insert in sorted position order.
         let pos = self.markers.partition_point(|m| m.position <= position);
@@ -77,16 +68,21 @@ impl MarkerStore {
     /// Rename the segment anchored by `anchor_id`.
     /// Returns an error if `anchor_id` belongs to an `End` marker or does not exist.
     pub fn rename_segment(&mut self, anchor_id: Uuid, title: String) -> Result<()> {
-        if let Some(t) = self.titles.get_mut(&anchor_id) {
-            *t = title;
-            Ok(())
-        } else if self.markers.iter().any(|m| m.id == anchor_id) {
-            Err(AppError::ValidationError(
+        let kind = self
+            .markers
+            .iter()
+            .find(|m| m.id == anchor_id)
+            .map(|m| m.kind)
+            .ok_or(AppError::MarkerNotFound(anchor_id))?;
+
+        if matches!(kind, MarkerKind::End) {
+            return Err(AppError::ValidationError(
                 "Cannot rename: marker is an End marker and does not anchor a segment".into(),
-            ))
-        } else {
-            Err(AppError::MarkerNotFound(anchor_id))
+            ));
         }
+
+        self.titles.insert(anchor_id, title);
+        Ok(())
     }
 
     /// Return all markers in sorted order.
@@ -115,19 +111,15 @@ mod tests {
     }
 
     #[test]
-    fn auto_title_increments() {
+    fn no_auto_titles_stored_for_new_markers() {
         let mut store = MarkerStore::new();
         let m1 = store.add(0, MarkerKind::Start);
         let m2 = store.add(1000, MarkerKind::StartEnd);
-        assert_eq!(store.titles[&m1.id], "001 Segment");
-        assert_eq!(store.titles[&m2.id], "002 Segment");
-    }
-
-    #[test]
-    fn end_marker_gets_no_title() {
-        let mut store = MarkerStore::new();
-        let m = store.add(0, MarkerKind::End);
-        assert!(!store.titles.contains_key(&m.id));
+        let m3 = store.add(2000, MarkerKind::End);
+        // Titles are only stored when explicitly renamed; new markers have none.
+        assert!(!store.titles.contains_key(&m1.id));
+        assert!(!store.titles.contains_key(&m2.id));
+        assert!(!store.titles.contains_key(&m3.id));
     }
 
     #[test]
@@ -160,9 +152,9 @@ mod tests {
     fn move_marker_preserves_title() {
         let mut store = MarkerStore::new();
         let s = store.add(1000, MarkerKind::Start);
-        let original_title = store.titles[&s.id].clone();
+        store.rename_segment(s.id, "Custom Title".into()).unwrap();
         store.move_marker(s.id, 2000).unwrap();
-        assert_eq!(store.titles[&s.id], original_title);
+        assert_eq!(store.titles[&s.id], "Custom Title");
     }
 
     #[test]

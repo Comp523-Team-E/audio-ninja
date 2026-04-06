@@ -207,11 +207,20 @@ pub async fn export_csv(app: AppHandle, state: State<'_, AppState>) -> Result<()
     // Validate markers first — errors surface before the dialog opens.
     let segments = state.markers.lock().to_segments()?;
 
+    let mut file_name = String::from("segments.txt");
+    if let Some(engine) = state.engine.lock().as_ref() {
+        if let Some(name) = engine.metadata.file_name_prefix() {
+            file_name = format!("{name}.txt")
+        };
+        println!("{}", file_name)
+    }
+
     let save_path = app
         .dialog()
         .file()
-        .set_file_name("segments.csv")
+        .set_file_name(file_name.as_str())
         .add_filter("CSV", &["csv"])
+        .add_filter("TXT", &["txt"])
         .blocking_save_file()
         .ok_or(AppError::DialogCancelled)?;
 

@@ -8,7 +8,7 @@ pub fn ms_to_timestamp(ms: u64) -> String {
     let secs = total_secs % 60;
     let minutes = (total_secs / 60) % 60;
     let hours = total_secs / 3600;
-    format!("{:02}:{:02}:{:02}.{:03}", hours, minutes, secs, millis)
+    format!("{:01}:{:02}:{:02}.{:03}", hours, minutes, secs, millis)
 }
 
 /// Write `segments` as RFC 4180 CSV to an arbitrary writer.
@@ -16,13 +16,17 @@ pub fn ms_to_timestamp(ms: u64) -> String {
 /// Header: `start_time,end_time,title`
 pub fn write_csv<W: std::io::Write>(writer: W, segments: &[Segment]) -> Result<()> {
     let mut wtr = csv::Writer::from_writer(writer);
-    wtr.write_record(["start_time", "end_time", "title"])?;
+    let mut counter = 1;
+
     for seg in segments {
         wtr.write_record([
+            &counter.to_string(),
             &ms_to_timestamp(seg.start_ms),
             &ms_to_timestamp(seg.end_ms),
             &seg.title,
         ])?;
+
+        counter += 1;
     }
     wtr.flush()?;
     Ok(())
