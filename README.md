@@ -10,8 +10,7 @@ To get started, cd into the project's directory and run the following commands
 
 ```bash
     npm install
-    npm run tauri android init
-    npm run tauri ios init
+    npm run tauri dev
 ```
 
 ## Recommended IDE Setup
