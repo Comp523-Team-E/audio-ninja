@@ -2,7 +2,7 @@ use std::sync::{
     mpsc::{self, SyncSender},
     Arc,
 };
-
+use std::path::Path;
 use rtrb::RingBuffer;
 
 use crate::error::{AppError, Result};
@@ -19,9 +19,17 @@ const RING_BUFFER_CAPACITY: usize = 32_768;
 #[serde(rename_all = "camelCase")]
 pub struct FileMetadata {
     pub file_name: String,
+    pub file_path: String,
     pub duration_ms: u64,
     pub sample_rate: u32,
     pub channels: u16,
+}
+
+impl FileMetadata {
+    pub fn file_name_prefix(&self) -> Option<String> {
+        let path = Path::new(&self.file_name);
+        Some(path.file_stem()?.to_str()?.to_string())
+    }
 }
 
 /// The live audio engine for a single loaded file.
@@ -52,6 +60,7 @@ impl AudioEngine {
 
         let metadata = FileMetadata {
             file_name,
+            file_path: path.to_string(),
             duration_ms: init.duration_ms,
             sample_rate: init.sample_rate,
             channels: init.channels,

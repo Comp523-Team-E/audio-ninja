@@ -1,83 +1,19 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { onDestroy } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { appState } from '$lib/state.svelte';
+  import { SPEEDS } from '$lib/utils';
+  import type { FileMetadata, PlaybackPosition, Marker, Segment, MarkerKind } from '$lib/types';
 
-  // ── Types ────────────────────────────────────────────────────────────────
+  import WelcomeScreen from '../components/WelcomeScreen.svelte';
+  import Header from '../components/Header.svelte';
+  import WaveformDisplay from '../components/WaveformDisplay.svelte';
+  import PlaybackControls from '../components/PlaybackControls.svelte';
+  import MarkerPanel from '../components/MarkerPanel.svelte';
+  import SegmentPanel from '../components/SegmentPanel.svelte';
+  import ShortcutsPanel from '../components/ShortcutsPanel.svelte';
 
-  interface FileMetadata {
-    fileName: string;
-    durationMs: number;
-    sampleRate: number;
-    channels: number;
-  }
-
-  interface PlaybackPosition {
-    positionMs: number;
-    isPlaying: boolean;
-    durationMs: number;
-  }
-
-  type MarkerKind = 'start' | 'end' | 'startEnd';
-
-  interface Marker {
-    id: string;
-    position: number;
-    kind: MarkerKind;
-  }
-
-  interface Segment {
-    startMs: number;
-    endMs: number;
-    title: string;
-  }
-
-  // ── State ────────────────────────────────────────────────────────────────
-
-  let metadata     = $state<FileMetadata | null>(null);
-  let positionMs   = $state(0);
-  let durationMs   = $state(0);
-  let isPlaying    = $state(false);
-  let isSeeking    = $state(false);
-  let markers      = $state<Marker[]>([]);
-  let segments     = $state<Segment[] | null>(null);
-  let error        = $state<string | null>(null);
-  let stepMs       = $state(5000);
-  let speed        = $state(1.0);
-  let looping      = $state(false);
-  let renameInputs = $state<Record<string, string>>({});
-
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
-  function formatMs(ms: number): string {
-    const h   = Math.floor(ms / 3_600_000);
-    const m   = Math.floor((ms % 3_600_000) / 60_000);
-    const s   = Math.floor((ms % 60_000) / 1000);
-    const mil = Math.floor(ms % 1000);
-    return (
-      String(h).padStart(2, '0') + ':' +
-      String(m).padStart(2, '0') + ':' +
-      String(s).padStart(2, '0') + '.' +
-      String(mil).padStart(3, '0')
-    );
-  }
-
-  function kindLabel(kind: MarkerKind): string {
-    if (kind === 'start') return 'Start';
-    if (kind === 'end')   return 'End';
-    return 'Start+End';
-  }
-
-  // ── Position polling + interpolation ────────────────────────────────────
-  //
-  // Strategy: poll the backend every 100 ms for a ground-truth position, then
-  // use requestAnimationFrame (~60 fps) to advance positionMs with the wall
-  // clock between syncs. This eliminates both the 100 ms poll stutter and the
-  // per-FLAC-packet jump (~93 ms at 44100 Hz / 4096 samples).
-
-  /** Last position received from the backend (ms). */
-  let syncPositionMs = 0;
-  /** performance.now() value at the moment syncPositionMs was recorded. */
-  let syncWallTime   = 0;
+  // ── Position polling + interpolation ─────────────────────────────────────
 
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   let rafHandle: number | null = null;
@@ -87,19 +23,18 @@
     pollInterval = setInterval(async () => {
       try {
         const p = await invoke<PlaybackPosition>('get_playback_position');
-        // Anchor the interpolation to the fresh backend value.
-        syncPositionMs = p.positionMs;
-        syncWallTime   = performance.now();
-        durationMs     = p.durationMs;
-        isPlaying      = p.isPlaying;
-        // When paused (and not seeking), snap immediately to the backend value.
-        // Never overwrite positionMs while the user is dragging — that's what
-        // causes the slider to jump back to the playback head mid-drag.
-        if (!p.isPlaying && !isSeeking) {
-          positionMs = p.positionMs;
+        appState.syncPositionMs = p.positionMs;
+        appState.syncWallTime   = performance.now();
+        appState.durationMs     = p.durationMs;
+        appState.isPlaying      = p.isPlaying;
+        // When paused, only snap if discrepancy is large (avoids glitchy snapping).
+        if (!p.isPlaying && !appState.waveformDragging) {
+          if (Math.abs(p.positionMs - appState.positionMs) > 500) {
+            appState.positionMs = p.positionMs;
+          }
         }
       } catch {
-        // No file loaded — ignore
+        // No file loaded
       }
     }, 100);
   }
@@ -107,345 +42,338 @@
   function startRaf() {
     if (rafHandle !== null) return;
     function tick() {
-      if (isPlaying && !isSeeking) {
-        const elapsed = performance.now() - syncWallTime;
-        positionMs = Math.min(syncPositionMs + elapsed * speed, durationMs);
+      if (appState.isPlaying && !appState.waveformDragging) {
+        const elapsed = performance.now() - appState.syncWallTime;
+        appState.positionMs = Math.min(appState.syncPositionMs + elapsed * appState.speed, appState.durationMs);
+        if (appState.wavesurfer && appState.durationMs > 0) {
+          appState.wavesurfer.setTime(appState.positionMs / 1000);
+        }
       }
       rafHandle = requestAnimationFrame(tick);
     }
     rafHandle = requestAnimationFrame(tick);
   }
 
-  onDestroy(() => {
-    if (pollInterval) clearInterval(pollInterval);
-    if (rafHandle !== null) cancelAnimationFrame(rafHandle);
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
+    if (!appState.metadata) return;
+
+    if (e.code === 'Space') {
+      e.preventDefault();
+      togglePlay();
+    } else if (e.key === 's' || e.key === 'S') {
+      e.preventDefault();
+      addMarker('start');
+    } else if (e.key === 'e' || e.key === 'E') {
+      e.preventDefault();
+      addMarker('end');
+    } else if (e.key === 'b' || e.key === 'B') {
+      e.preventDefault();
+      addMarker('startEnd');
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (appState.selectedMarkerId) {
+        e.preventDefault();
+        deleteMarker(appState.selectedMarkerId);
+      }
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      stepFwd();
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      stepBack();
+    } else if (e.key === 'd' || e.key === 'D') {
+      e.preventDefault();
+      seekToPrevMarker();
+    } else if (e.key === 'f' || e.key === 'F') {
+      e.preventDefault();
+      seekToNextMarker();
+    } else if (e.key >= '1' && e.key <= '5') {
+      e.preventDefault();
+      const idx = parseInt(e.key) - 1;
+      if (SPEEDS[idx] !== undefined) setSpeed(SPEEDS[idx]);
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+      e.preventDefault();
+      exportCsv();
+    }
+  }
+
+  onMount(() => {
+    document.addEventListener('keydown', handleKeydown);
   });
 
-  // ── IPC handlers ─────────────────────────────────────────────────────────
+  onDestroy(() => {
+    document.removeEventListener('keydown', handleKeydown);
+    if (pollInterval) clearInterval(pollInterval);
+    if (rafHandle !== null) cancelAnimationFrame(rafHandle);
+    if (appState.wavesurfer) appState.wavesurfer.destroy();
+  });
+
+  // ── Seeking ───────────────────────────────────────────────────────────────
+
+  async function seekTo(ms: number) {
+    try {
+      await invoke('seek', { positionMs: Math.round(ms) });
+      appState.positionMs     = ms;
+      appState.syncPositionMs = ms;
+      appState.syncWallTime   = performance.now();
+      if (appState.wavesurfer && appState.durationMs > 0) {
+        appState.wavesurfer.setTime(ms / 1000);
+      }
+    } catch (e) {
+      appState.error = String(e);
+    }
+  }
+
+  async function seekToPrevMarker() {
+    const prev = [...appState.markers]
+      .filter(m => m.position < appState.positionMs - 50)
+      .sort((a, b) => b.position - a.position)[0];
+    if (prev) await seekTo(prev.position);
+  }
+
+  async function seekToNextMarker() {
+    const next = appState.markers
+      .filter(m => m.position > appState.positionMs + 50)
+      .sort((a, b) => a.position - b.position)[0];
+    if (next) await seekTo(next.position);
+  }
+
+  async function stepBack() {
+    await seekTo(Math.max(appState.positionMs - appState.stepMs, 0));
+  }
+
+  async function stepFwd() {
+    await seekTo(Math.min(appState.positionMs + appState.stepMs, appState.durationMs));
+  }
+
+  // ── IPC handlers ──────────────────────────────────────────────────────────
 
   async function openFile() {
     try {
-      error = null;
-      metadata     = await invoke<FileMetadata>('open_file_dialog');
-      durationMs   = metadata.durationMs;
-      positionMs   = 0;
-      markers      = [];
-      segments     = null;
-      renameInputs = {};
+      appState.error = null;
+      const meta = await invoke<FileMetadata>('open_file_dialog');
+      appState.metadata        = meta;
+      appState.durationMs      = meta.durationMs;
+      appState.positionMs      = 0;
+      appState.markers         = [];
+      appState.segments        = null;
+      appState.renameInputs    = {};
+      appState.selectedMarkerId = null;
       startPolling();
       startRaf();
     } catch (e) {
-      error = String(e);
+      appState.error = String(e);
     }
   }
 
   async function togglePlay() {
     try {
-      error = null;
-      await invoke(isPlaying ? 'pause' : 'play');
+      appState.error = null;
+      await invoke(appState.isPlaying ? 'pause' : 'play');
     } catch (e) {
-      error = String(e);
+      appState.error = String(e);
     }
   }
 
-  // Track whether audio was playing when the drag began so we can resume it.
-  let wasPlayingBeforeSeek = false;
-
-  function handleSeekStart() {
-    isSeeking = true;
-    wasPlayingBeforeSeek = isPlaying;
-    if (isPlaying) {
-      isPlaying = false;                      // optimistic UI update
-      invoke('pause').catch(() => {});        // tell the backend; don't await
-    }
-  }
-
-  async function handleSeekEnd(e: Event) {
-    const ms = Number((e.currentTarget as HTMLInputElement).value);
-    positionMs = ms;
+  async function setSpeed(s: number) {
+    appState.speed = s;
     try {
-      error = null;
-      await invoke('seek', { positionMs: Math.round(ms) });
-      // Re-anchor interpolation so the RAF loop starts from the new position.
-      syncPositionMs = ms;
-      syncWallTime   = performance.now();
-      // Resume playback if it was playing before the drag.
-      if (wasPlayingBeforeSeek) {
-        await invoke('play');
-        isPlaying = true;
-      }
-    } catch (err) {
-      error = String(err);
-    } finally {
-      isSeeking = false;
-    }
-  }
-
-  async function stepBack() {
-    try {
-      error = null;
-      await invoke('step_backward', { stepMs: Math.round(stepMs) });
+      appState.error = null;
+      await invoke('set_speed', { speed: s });
     } catch (e) {
-      error = String(e);
+      appState.error = String(e);
     }
   }
 
-  async function stepFwd() {
+  async function handleLoop(enabled: boolean) {
+    appState.looping = enabled;
     try {
-      error = null;
-      await invoke('step_forward', { stepMs: Math.round(stepMs) });
+      appState.error = null;
+      await invoke('set_loop', { enabled });
     } catch (e) {
-      error = String(e);
-    }
-  }
-
-  async function handleSpeed(e: Event) {
-    speed = Number((e.currentTarget as HTMLSelectElement).value);
-    try {
-      error = null;
-      await invoke('set_speed', { speed });
-    } catch (err) {
-      error = String(err);
-    }
-  }
-
-  async function handleLoop(e: Event) {
-    looping = (e.currentTarget as HTMLInputElement).checked;
-    try {
-      error = null;
-      await invoke('set_loop', { enabled: looping });
-    } catch (err) {
-      error = String(err);
+      appState.error = String(e);
     }
   }
 
   async function addMarker(kind: MarkerKind) {
+    await addMarkerAt(kind, appState.positionMs);
+  }
+
+  async function addMarkerNoKind() {
     try {
-      error = null;
+      appState.error = null;
       const m = await invoke<Marker>('add_marker', {
-        positionMs: Math.round(positionMs),
+        positionMs: Math.round(appState.positionMs),
+        kind: 'start',
+      });
+      appState.markers = [...appState.markers, m].sort((a, b) => a.position - b.position);
+      appState.renameInputs = { ...appState.renameInputs, [m.id]: '' };
+      appState.selectedMarkerId = m.id;
+      appState.unkindedMarkers = new Set([...appState.unkindedMarkers, m.id]);
+      await revalidate();
+    } catch (e) {
+      appState.error = String(e);
+    }
+  }
+
+  async function addMarkerAt(kind: MarkerKind, posMs: number) {
+    try {
+      appState.error = null;
+      const m = await invoke<Marker>('add_marker', {
+        positionMs: Math.round(posMs),
         kind,
       });
-      markers = [...markers, m].sort((a, b) => a.position - b.position);
+      appState.markers = [...appState.markers, m].sort((a, b) => a.position - b.position);
       if (kind !== 'end') {
-        renameInputs = { ...renameInputs, [m.id]: '' };
+        appState.renameInputs = { ...appState.renameInputs, [m.id]: '' };
       }
+      appState.selectedMarkerId = m.id;
+      await revalidate();
     } catch (e) {
-      error = String(e);
+      appState.error = String(e);
     }
   }
 
   async function deleteMarker(id: string) {
     try {
-      error = null;
+      appState.error = null;
       await invoke('delete_marker', { id });
-      markers = markers.filter(m => m.id !== id);
-      const updated = { ...renameInputs };
+      appState.markers = appState.markers.filter(m => m.id !== id);
+      const updated = { ...appState.renameInputs };
       delete updated[id];
-      renameInputs = updated;
+      appState.renameInputs = updated;
+      if (appState.selectedMarkerId === id) appState.selectedMarkerId = null;
+      if (appState.unkindedMarkers.has(id)) {
+        const s = new Set(appState.unkindedMarkers);
+        s.delete(id);
+        appState.unkindedMarkers = s;
+      }
+      await revalidate();
     } catch (e) {
-      error = String(e);
+      appState.error = String(e);
     }
   }
 
   async function renameSegment(anchorId: string) {
     try {
-      error = null;
-      const title = renameInputs[anchorId] ?? '';
+      appState.error = null;
+      const title = appState.renameInputs[anchorId] ?? '';
       await invoke('rename_segment', { anchorId, title });
+      await revalidate();
     } catch (e) {
-      error = String(e);
+      appState.error = String(e);
     }
   }
 
-  async function validate() {
+  function computePartialSegments(): Segment[] {
+    const sorted = [...appState.markers].sort((a, b) => a.position - b.position);
+    const result: Segment[] = [];
+    let pendingStart: Marker | null = null;
+
+    for (const m of sorted) {
+      if (m.kind === 'startEnd') {
+        if (pendingStart) {
+          result.push({ startMs: pendingStart.position, endMs: m.position,
+            title: appState.renameInputs[pendingStart.id] || `Segment ${result.length}` });
+          pendingStart = m;
+        } else {
+          result.push({ startMs: m.position, endMs: m.position,
+            title: appState.renameInputs[m.id] || `Segment ${result.length}` });
+        }
+      } else if (m.kind === 'start') {
+        pendingStart = m;
+      } else if (m.kind === 'end') {
+        if (pendingStart) {
+          result.push({ startMs: pendingStart.position, endMs: m.position,
+            title: appState.renameInputs[pendingStart.id] || `Segment ${result.length}` });
+          pendingStart = null;
+        }
+      }
+    }
+    return result;
+  }
+
+  async function revalidate() {
     try {
-      error = null;
-      segments = await invoke<Segment[]>('validate_markers');
+      appState.segments = await invoke<Segment[]>('validate_markers');
+      appState.validationError = null;
     } catch (e) {
-      error = String(e);
-      segments = null;
+      appState.validationError = String(e);
+      appState.segments = computePartialSegments();
     }
   }
 
   async function exportCsv() {
     try {
-      error = null;
+      appState.error = null;
       await invoke('export_csv');
     } catch (e) {
-      error = String(e);
+      appState.error = String(e);
     }
   }
 </script>
 
-<main>
-  <h1>Media Markup</h1>
-
-  <!-- ── File open ─────────────────────────────────────────── -->
-  <section>
-    <button onclick={openFile}>Open File…</button>
-    {#if error}
-      <p><strong>Error:</strong> {error}</p>
-    {/if}
-  </section>
-
-  {#if metadata}
-
-  <!-- ── File info ─────────────────────────────────────────── -->
-  <section>
-    <h2>File</h2>
-    <p>
-      <strong>{metadata.fileName}</strong> —
-      Duration: {formatMs(durationMs)} —
-      {metadata.sampleRate} Hz —
-      {metadata.channels} ch
-    </p>
-  </section>
-
-  <!-- ── Playback ──────────────────────────────────────────── -->
-  <section>
-    <h2>Playback</h2>
-
-    <p>
-      <strong>{formatMs(positionMs)}</strong> / {formatMs(durationMs)}
-      &nbsp;
-      {isPlaying ? '▶ Playing' : '⏸ Paused'}
-    </p>
-
-    <input
-      type="range"
-      min="0"
-      max={durationMs}
-      value={positionMs}
-      onmousedown={handleSeekStart}
-      ontouchstart={handleSeekStart}
-      oninput={(e) => { positionMs = Number((e.currentTarget as HTMLInputElement).value); }}
-      onchange={handleSeekEnd}
-      style="width: 100%"
+{#if !appState.metadata}
+  <WelcomeScreen onOpenFile={openFile} />
+{:else}
+  <div class="app">
+    <Header onOpenFile={openFile} onExportCsv={exportCsv} />
+    <WaveformDisplay />
+    <PlaybackControls
+      onStepBack={stepBack}
+      onTogglePlay={togglePlay}
+      onStepFwd={stepFwd}
+      onSetSpeed={setSpeed}
+      onToggleLoop={handleLoop}
     />
+    <div class="panels">
+      <MarkerPanel
+        onAddMarkerNoKind={addMarkerNoKind}
+        onDeleteMarker={deleteMarker}
+        onAddMarkerAt={addMarkerAt}
+      />
+      <SegmentPanel onRenameSegment={renameSegment} />
+      <ShortcutsPanel />
+    </div>
+  </div>
+{/if}
 
-    <br><br>
+<style>
+  :global(*, *::before, *::after) {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 
-    <button onclick={togglePlay}>{isPlaying ? 'Pause' : 'Play'}</button>
-    &nbsp;
-    <button onclick={stepBack}>← Step Back</button>
-    <button onclick={stepFwd}>Step Fwd →</button>
-    &nbsp;
-    <label>
-      Step size (ms):
-      <input type="number" min="100" max="60000" bind:value={stepMs} style="width: 6em">
-    </label>
+  :global(body) {
+    background: #0d1117;
+    color: #e2e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    overflow: hidden;
+    height: 100vh;
+  }
 
-    <br><br>
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
 
-    <label>
-      Speed:
-      <select onchange={handleSpeed} value={speed}>
-        <option value={0.5}>0.5×</option>
-        <option value={0.75}>0.75×</option>
-        <option value={1.0}>1×</option>
-        <option value={1.5}>1.5×</option>
-        <option value={2.0}>2×</option>
-      </select>
-    </label>
-    &nbsp;
-    <label>
-      <input type="checkbox" checked={looping} onchange={handleLoop}>
-      Loop
-    </label>
-  </section>
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr;
+    flex: 1;
+    overflow: hidden;
+    min-height: 0;
+  }
 
-  <!-- ── Markers ───────────────────────────────────────────── -->
-  <section>
-    <h2>Markers</h2>
-    <p>Current position: <strong>{formatMs(positionMs)}</strong></p>
-
-    <button onclick={() => addMarker('start')}>Add Start</button>
-    <button onclick={() => addMarker('end')}>Add End</button>
-    <button onclick={() => addMarker('startEnd')}>Add Start+End</button>
-
-    {#if markers.length === 0}
-      <p>No markers yet.</p>
-    {:else}
-      <table border="1" cellpadding="4">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Position</th>
-            <th>Kind</th>
-            <th>Rename Segment</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each markers as m, i}
-            <tr>
-              <td>{i + 1}</td>
-              <td>{formatMs(m.position)}</td>
-              <td>{kindLabel(m.kind)}</td>
-              <td>
-                {#if m.kind !== 'end'}
-                  <input
-                    type="text"
-                    placeholder="Segment title…"
-                    value={renameInputs[m.id] ?? ''}
-                    oninput={(e) => {
-                      renameInputs = {
-                        ...renameInputs,
-                        [m.id]: (e.currentTarget as HTMLInputElement).value,
-                      };
-                    }}
-                    style="width: 14em"
-                  />
-                  <button onclick={() => renameSegment(m.id)}>Rename</button>
-                {/if}
-              </td>
-              <td>
-                <button onclick={() => deleteMarker(m.id)}>Delete</button>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    {/if}
-  </section>
-
-  <!-- ── Segments / Export ─────────────────────────────────── -->
-  <section>
-    <h2>Segments &amp; Export</h2>
-
-    <button onclick={validate}>Validate Markers</button>
-    &nbsp;
-    <button onclick={exportCsv}>Export CSV…</button>
-
-    {#if segments !== null}
-      {#if segments.length === 0}
-        <p>Validation passed — no segments (no markers placed).</p>
-      {:else}
-        <p>Validation passed — {segments.length} segment(s):</p>
-        <table border="1" cellpadding="4">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Start</th>
-              <th>End</th>
-              <th>Title</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each segments as seg, i}
-              <tr>
-                <td>{i + 1}</td>
-                <td>{formatMs(seg.startMs)}</td>
-                <td>{formatMs(seg.endMs)}</td>
-                <td>{seg.title}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      {/if}
-    {/if}
-  </section>
-
-  {/if}
-</main>
+  :global(::-webkit-scrollbar) { width: 6px; }
+  :global(::-webkit-scrollbar-track) { background: transparent; }
+  :global(::-webkit-scrollbar-thumb) { background: #30363d; border-radius: 3px; }
+  :global(::-webkit-scrollbar-thumb:hover) { background: #4d5b6b; }
+</style>

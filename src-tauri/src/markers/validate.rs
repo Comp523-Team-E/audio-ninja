@@ -33,7 +33,7 @@ pub fn to_segments(
                 let title = titles
                     .get(&m.id)
                     .cloned()
-                    .unwrap_or_else(|| String::from("Untitled"));
+                    .unwrap_or_else(|| format!("Segment {}", segments.len()));
                 segments.push(Segment {
                     start_ms: m.position,
                     end_ms: m.position,
@@ -49,7 +49,7 @@ pub fn to_segments(
                 let title = titles
                     .get(&start.id)
                     .cloned()
-                    .unwrap_or_else(|| String::from("Untitled"));
+                    .unwrap_or_else(|| format!("Segment {}", segments.len()));
                 segments.push(Segment {
                     start_ms: start.position,
                     end_ms: m.position,
@@ -57,8 +57,21 @@ pub fn to_segments(
                 });
                 state = State::Idle;
             }
-            (State::WaitingForEnd(_), MarkerKind::Start)
-            | (State::WaitingForEnd(_), MarkerKind::StartEnd) => {
+            (State::WaitingForEnd(start), MarkerKind::StartEnd) => {
+                // StartEnd closes the pending Start segment and simultaneously
+                // opens a new one, so the next End can close it.
+                let title = titles
+                    .get(&start.id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("Segment {}", segments.len()));
+                segments.push(Segment {
+                    start_ms: start.position,
+                    end_ms: m.position,
+                    title,
+                });
+                state = State::WaitingForEnd(m);
+            }
+            (State::WaitingForEnd(_), MarkerKind::Start) => {
                 return Err(AppError::ValidationError(
                     "Two consecutive Start markers found without an End marker between them".into(),
                 ));
