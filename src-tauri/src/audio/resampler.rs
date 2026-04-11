@@ -168,4 +168,22 @@ mod tests {
         let result = interleave(&[ch0, ch1]);
         assert_eq!(result, vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
     }
+
+    #[test]
+    fn interleave_empty_channels_returns_empty() {
+        let result = interleave(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn interleave_mismatched_channel_lengths() {
+        // ch0 has 3 frames, ch1 has only 1 — exercises the `if f < ch.len()` guard
+        let ch0 = vec![1.0f32, 2.0, 3.0];
+        let ch1 = vec![4.0f32];
+        let result = interleave(&[ch0, ch1]);
+        // frame 0: ch0[0]=1.0, ch1[0]=4.0
+        // frame 1: ch0[1]=2.0, ch1 skipped (f=1 >= ch1.len()=1)
+        // frame 2: ch0[2]=3.0, ch1 skipped
+        assert_eq!(result, vec![1.0, 4.0, 2.0, 3.0]);
+    }
 }
