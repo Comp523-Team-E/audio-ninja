@@ -190,4 +190,18 @@ mod tests {
         let segments = store.to_segments().unwrap();
         assert!(segments.is_empty());
     }
+
+    #[test]
+    fn rename_nonexistent_marker_returns_error() {
+        let mut store = MarkerStore::new();
+        let result = store.rename_segment(Uuid::new_v4(), "anything".into());
+        assert!(matches!(result, Err(crate::error::AppError::MarkerNotFound(_))));
+    }
+
+    #[test]
+    fn move_nonexistent_marker_returns_error() {
+        let mut store = MarkerStore::new();
+        let result = store.move_marker(Uuid::new_v4(), 1000);
+        assert!(matches!(result, Err(crate::error::AppError::MarkerNotFound(_))));
+    }
 }

@@ -1,0 +1,19 @@
+[alias]
+# Run tests with llvm-cov and exclude entry-point boilerplate from the report.
+# Usage: cargo coverage
+#   --features test-audio   enables NullSink in audio engine tests
+#   --ignore-filename-regex  excludes lib.rs, main.rs, and commands.rs (untestable entry points)
+coverage = [
+    "llvm-cov",
+    "--features", "test-audio",
+    "--ignore-filename-regex", "(lib|main|commands)\\.rs$",
+]
+
+# HTML report variant:
+# cargo coverage-html
+coverage-html = [
+    "llvm-cov",
+    "--features", "test-audio",
+    "--ignore-filename-regex", "(lib|main|commands)\\.rs$",
+    "--html",
+]

@@ -343,3 +343,513 @@ fn decode_loop(
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{mpsc, Arc};
+    use std::time::Duration;
+
+    // -----------------------------------------------------------------------
+    // WAV fixture helper — generates a minimal valid RIFF/PCM WAV file
+    // -----------------------------------------------------------------------
+
+    /// Write a 16-bit PCM WAV file to `path`.
+    /// `num_frames` frames × `channels` channels, at `sample_rate` Hz.
+    fn write_test_wav(
+        path: &std::path::Path,
+        sample_rate: u32,
+        channels: u16,
+        num_frames: u32,
+    ) {
+        use std::io::Write;
+        let bits_per_sample: u16 = 16;
+        let block_align = channels * bits_per_sample / 8;
+        let byte_rate = sample_rate * block_align as u32;
+        let data_size = num_frames * block_align as u32;
+        let riff_size = 36u32 + data_size; // 4(WAVE)+8+16(fmt)+8+data
+
+        let mut f = std::fs::File::create(path).unwrap();
+        f.write_all(b"RIFF").unwrap();
+        f.write_all(&riff_size.to_le_bytes()).unwrap();
+        f.write_all(b"WAVE").unwrap();
+        f.write_all(b"fmt ").unwrap();
+        f.write_all(&16u32.to_le_bytes()).unwrap();
+        f.write_all(&1u16.to_le_bytes()).unwrap(); // PCM
+        f.write_all(&channels.to_le_bytes()).unwrap();
+        f.write_all(&sample_rate.to_le_bytes()).unwrap();
+        f.write_all(&byte_rate.to_le_bytes()).unwrap();
+        f.write_all(&block_align.to_le_bytes()).unwrap();
+        f.write_all(&bits_per_sample.to_le_bytes()).unwrap();
+        f.write_all(b"data").unwrap();
+        f.write_all(&data_size.to_le_bytes()).unwrap();
+        // Sine wave samples
+        let two_pi = 2.0 * std::f64::consts::PI;
+        for i in 0..num_frames {
+            for ch in 0..channels {
+                let angle = i as f64 * two_pi / sample_rate as f64 * 440.0 * (ch as f64 + 1.0);
+                let sample = (angle.sin() * i16::MAX as f64) as i16;
+                f.write_all(&sample.to_le_bytes()).unwrap();
+            }
+        }
+        f.flush().unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // Helper: spawn a decoder with a given ring buffer capacity and initial speed
+    // -----------------------------------------------------------------------
+
+    fn spawn_decoder(
+        path: &str,
+        ring_capacity: usize,
+        initial_speed: f64,
+    ) -> (
+        mpsc::SyncSender<ControlMsg>,
+        Arc<PlaybackState>,
+        std::thread::JoinHandle<()>,
+        rtrb::Consumer<f32>,
+    ) {
+        let (producer, consumer) = rtrb::RingBuffer::<f32>::new(ring_capacity);
+        let (tx, rx) = mpsc::sync_channel::<ControlMsg>(32);
+        let state = Arc::new(PlaybackState::new());
+        let state_c = Arc::clone(&state);
+        let path_owned = path.to_string();
+        let handle = std::thread::spawn(move || {
+            run_decoder(path_owned, producer, rx, state_c, initial_speed);
+        });
+        (tx, state, handle, consumer)
+    }
+
+    /// Poll `predicate` up to `timeout` sleeping 5ms between checks.
+    fn wait_until(predicate: impl Fn() -> bool, timeout: Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            if predicate() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        false
+    }
+
+    // -----------------------------------------------------------------------
+    // probe_file tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn probe_file_valid_wav_returns_metadata() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("test.wav");
+        write_test_wav(&path, 44100, 1, 4410); // 100 ms mono
+        let init = probe_file(path.to_str().unwrap()).unwrap();
+        assert_eq!(init.sample_rate, 44100);
+        assert_eq!(init.channels, 1);
+        assert!(init.duration_ms > 0);
+    }
+
+    #[test]
+    fn probe_file_stereo_wav() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("stereo.wav");
+        write_test_wav(&path, 48000, 2, 9600); // 200 ms stereo
+        let init = probe_file(path.to_str().unwrap()).unwrap();
+        assert_eq!(init.sample_rate, 48000);
+        assert_eq!(init.channels, 2);
+    }
+
+    #[test]
+    fn probe_file_missing_file_returns_error() {
+        let result = probe_file("/nonexistent/path/audio.wav");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn probe_file_empty_file_returns_error() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("empty.wav");
+        std::fs::File::create(&path).unwrap(); // 0-byte file
+        let result = probe_file(path.to_str().unwrap());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn probe_file_no_extension_hint() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("noext"); // no .wav extension
+        write_test_wav(&path, 44100, 1, 4410);
+        // Symphonia may still probe successfully via content detection.
+        // Either Ok or Err is acceptable; we just verify it doesn't panic.
+        let _ = probe_file(path.to_str().unwrap());
+    }
+
+    // -----------------------------------------------------------------------
+    // run_decoder tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn decoder_stop_immediately() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, _state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_play_then_stop() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        // Small ring buffer (256 < 4410) creates back-pressure so the decoder
+        // stays in the write loop with is_playing=true until we send Stop.
+        let (tx, state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 256, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        assert!(wait_until(|| state.get_is_playing(), Duration::from_secs(2)));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_pause_then_play_then_stop() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 256, 1.0);
+        // Starts paused; send Pause (exercises the no-op _ arm while paused).
+        tx.send(ControlMsg::Pause).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        // Now send Play to start playback.
+        tx.send(ControlMsg::Play).unwrap();
+        assert!(wait_until(|| state.get_is_playing(), Duration::from_secs(2)));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_seek_while_paused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        // Decoder starts paused; send Seek while paused.
+        tx.send(ControlMsg::Seek(50)).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(state.get_position_ms(), 50.0);
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_set_speed_while_paused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, _state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        tx.send(ControlMsg::SetSpeed(2.0)).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_set_loop_while_paused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, _state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        tx.send(ControlMsg::SetLoop(true)).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_channel_closed_while_paused_exits() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, _state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        drop(tx); // closing the channel while paused triggers Err(_) => Ok(())
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_set_speed_at_1x_disables_resampler() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        // Start with non-1x speed so resampler is created, then switch back.
+        let (tx, _state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 2.0);
+        tx.send(ControlMsg::SetSpeed(1.0)).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_loop_mode_restarts_at_eof() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("short.wav");
+        // Very short: 10 ms at 44100 Hz = 441 frames
+        write_test_wav(&path, 44100, 1, 441);
+        let (tx, state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        tx.send(ControlMsg::SetLoop(true)).unwrap();
+        tx.send(ControlMsg::Play).unwrap();
+        // Let it play and loop at least once; position resets to near 0 on loop.
+        assert!(wait_until(|| state.get_is_playing(), Duration::from_secs(2)));
+        std::thread::sleep(Duration::from_millis(100));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_eof_no_loop_stop_after_eof() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("short.wav");
+        write_test_wav(&path, 44100, 1, 441); // 10 ms
+        let (tx, state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        // Wait until EOF (decoder sets is_playing=false after EOF without loop).
+        assert!(wait_until(|| !state.get_is_playing(), Duration::from_secs(3)));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_eof_no_loop_seek_after_eof() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("short.wav");
+        write_test_wav(&path, 44100, 1, 441);
+        let (tx, state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        assert!(wait_until(|| !state.get_is_playing(), Duration::from_secs(3)));
+        // Send Seek after EOF — decoder handles it in the post-EOF recv block.
+        tx.send(ControlMsg::Seek(0)).unwrap();
+        std::thread::sleep(Duration::from_millis(50));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_eof_no_loop_play_restarts() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("short.wav");
+        write_test_wav(&path, 44100, 1, 441);
+        // Large buffer so decoder reaches EOF without back-pressure.
+        let (tx, state, handle, mut consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        // Drain consumer continuously so decoder can proceed to EOF.
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        assert!(wait_until(|| !state.get_is_playing(), Duration::from_secs(3)));
+        // Re-send Play — decoder should seek to 0 and restart (exercises that code path).
+        tx.send(ControlMsg::Play).unwrap();
+        // Give the decoder a moment to process Play and re-decode, then stop.
+        std::thread::sleep(Duration::from_millis(50));
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_eof_no_loop_other_msg_continues() {
+        // Exercises the Ok(_) => {} catch-all in the post-EOF recv block.
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("short.wav");
+        write_test_wav(&path, 44100, 1, 441);
+        let (tx, state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        assert!(wait_until(|| !state.get_is_playing(), Duration::from_secs(3)));
+        // Send SetLoop(false) — hits the Ok(_) catch-all at EOF, then continues loop.
+        tx.send(ControlMsg::SetLoop(false)).unwrap();
+        std::thread::sleep(Duration::from_millis(30));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_write_loop_pause() {
+        // Small ring buffer forces back-pressure; send Pause during write loop.
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        // Tiny ring buffer (32 samples) → decoder enters write loop immediately.
+        let (tx, state, handle, mut consumer) =
+            spawn_decoder(path.to_str().unwrap(), 32, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        // Let the decoder start and fill the tiny buffer.
+        std::thread::sleep(Duration::from_millis(10));
+        tx.send(ControlMsg::Pause).unwrap();
+        // Drain the ring so the decoder can unblock.
+        std::thread::sleep(Duration::from_millis(5));
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        assert!(wait_until(|| !state.get_is_playing(), Duration::from_secs(2)));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_write_loop_stop() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, _state, handle, mut consumer) =
+            spawn_decoder(path.to_str().unwrap(), 32, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        tx.send(ControlMsg::Stop).unwrap();
+        // Drain so the decoder can exit the write loop.
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_write_loop_seek() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, _state, handle, mut consumer) =
+            spawn_decoder(path.to_str().unwrap(), 32, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        tx.send(ControlMsg::Seek(0)).unwrap();
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        std::thread::sleep(Duration::from_millis(20));
+        tx.send(ControlMsg::Stop).unwrap();
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_write_loop_set_speed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, _state, handle, mut consumer) =
+            spawn_decoder(path.to_str().unwrap(), 32, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        tx.send(ControlMsg::SetSpeed(1.5)).unwrap();
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        std::thread::sleep(Duration::from_millis(20));
+        tx.send(ControlMsg::Stop).unwrap();
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_write_loop_set_loop() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, _state, handle, mut consumer) =
+            spawn_decoder(path.to_str().unwrap(), 32, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        tx.send(ControlMsg::SetLoop(true)).unwrap();
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        std::thread::sleep(Duration::from_millis(20));
+        tx.send(ControlMsg::Stop).unwrap();
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_write_loop_play_noop() {
+        // Exercises the `Ok(ControlMsg::Play) => {}` arm (already playing).
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, _state, handle, mut consumer) =
+            spawn_decoder(path.to_str().unwrap(), 32, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        // Send Play while already playing.
+        tx.send(ControlMsg::Play).unwrap();
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        std::thread::sleep(Duration::from_millis(20));
+        tx.send(ControlMsg::Stop).unwrap();
+        let _ = consumer.read_chunk(consumer.slots()).map(|c| c.commit_all());
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_nonblocking_seek_while_playing() {
+        // Exercises ControlMsg::Seek in the non-blocking loop (top of outer loop).
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, _state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        tx.send(ControlMsg::Seek(0)).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_nonblocking_set_speed_while_playing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        let (tx, _state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 65536, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        tx.send(ControlMsg::SetSpeed(2.0)).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        tx.send(ControlMsg::SetSpeed(1.0)).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn decoder_nonblocking_pause_while_playing() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("t.wav");
+        write_test_wav(&path, 44100, 1, 4410);
+        // Small buffer keeps is_playing=true in the write loop.
+        let (tx, state, handle, _consumer) =
+            spawn_decoder(path.to_str().unwrap(), 256, 1.0);
+        tx.send(ControlMsg::Play).unwrap();
+        assert!(wait_until(|| state.get_is_playing(), Duration::from_secs(2)));
+        tx.send(ControlMsg::Pause).unwrap();
+        assert!(wait_until(|| !state.get_is_playing(), Duration::from_secs(2)));
+        tx.send(ControlMsg::Stop).unwrap();
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn run_decoder_bad_path_sets_not_playing() {
+        let (producer, _consumer) = rtrb::RingBuffer::<f32>::new(1024);
+        let (tx, rx) = mpsc::sync_channel::<ControlMsg>(4);
+        let state = Arc::new(PlaybackState::new());
+        let state_c = Arc::clone(&state);
+        let handle = std::thread::spawn(move || {
+            run_decoder("/nonexistent/audio.wav".to_string(), producer, rx, state_c, 1.0);
+        });
+        drop(tx);
+        handle.join().unwrap();
+        assert!(!state.get_is_playing());
+    }
+}

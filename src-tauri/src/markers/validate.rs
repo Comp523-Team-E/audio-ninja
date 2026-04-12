@@ -175,4 +175,36 @@ mod tests {
         let result = to_segments(&[s, se], &HashMap::new());
         assert!(result.is_err());
     }
+
+    #[test]
+    fn untitled_start_end_pair_uses_generated_title() {
+        // Exercises the unwrap_or_else fallback in the WaitingForEnd+End branch
+        let s = marker(0, MarkerKind::Start);
+        let e = marker(1000, MarkerKind::End);
+        let segments = to_segments(&[s, e], &HashMap::new()).unwrap();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].title, "Segment 0");
+    }
+
+    #[test]
+    fn untitled_startend_uses_generated_title() {
+        // Exercises the unwrap_or_else fallback in the Idle+StartEnd branch
+        let m = marker(500, MarkerKind::StartEnd);
+        let segments = to_segments(&[m], &HashMap::new()).unwrap();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].title, "Segment 0");
+    }
+
+    #[test]
+    fn start_then_titled_startend_emits_titled_segment() {
+        // Exercises the WaitingForEnd+StartEnd branch WITH a title on the Start marker
+        let s = marker(0, MarkerKind::Start);
+        let se = marker(1000, MarkerKind::StartEnd);
+        let end = marker(2000, MarkerKind::End);
+        let mut titles = HashMap::new();
+        titled(&s, &mut titles, "First");
+        let segments = to_segments(&[s, se, end], &titles).unwrap();
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].title, "First");
+    }
 }

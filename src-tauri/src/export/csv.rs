@@ -106,4 +106,19 @@ mod tests {
         let s = String::from_utf8(buf).unwrap();
         assert!(s.contains("\"Hello, World\""));
     }
+
+    #[test]
+    fn write_csv_io_error_propagates() {
+        struct FailWriter;
+        impl std::io::Write for FailWriter {
+            fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "fail"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "fail"))
+            }
+        }
+        let result = write_csv(FailWriter, &[seg(0, 1000, "test")]);
+        assert!(result.is_err());
+    }
 }

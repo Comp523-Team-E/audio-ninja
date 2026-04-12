@@ -24,7 +24,8 @@ pub trait AudioSink: Send + 'static {
 
 /// Wraps a live `cpal::Stream`. Dropping this stops audio output.
 pub struct CpalSink {
-    _stream: Stream,
+    /// `None` only in test builds where `new_for_test` is used.
+    _stream: Option<Stream>,
     #[allow(dead_code)]
     sample_rate: u32,
     #[allow(dead_code)]
@@ -48,6 +49,15 @@ impl AudioSink for CpalSink {
 // thread boundaries by our code.
 unsafe impl Send for CpalSink {}
 unsafe impl Sync for CpalSink {}
+
+#[cfg(test)]
+impl CpalSink {
+    /// Create a `CpalSink` with dummy values for testing the `AudioSink` trait impl.
+    /// Does NOT open any audio hardware; `_stream` is `None`.
+    pub fn new_for_test(sample_rate: u32, channels: u16) -> Self {
+        Self { _stream: None, sample_rate, channels }
+    }
+}
 
 /// Open the default output device and start streaming samples from `consumer`.
 ///
@@ -93,7 +103,7 @@ pub fn open_cpal_sink(
 
     stream.play().map_err(|e| AppError::AudioOutput(e.to_string()))?;
 
-    Ok(CpalSink { _stream: stream, sample_rate, channels })
+    Ok(CpalSink { _stream: Some(stream), sample_rate, channels })
 }
 
 // ---------------------------------------------------------------------------
@@ -124,5 +134,31 @@ impl AudioSink for NullSink {
     }
     fn channels(&self) -> u16 {
         self.channels
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn null_sink_sample_rate_and_channels() {
+        let sink = NullSink::new(48000, 2);
+        assert_eq!(sink.sample_rate(), 48000);
+        assert_eq!(sink.channels(), 2);
+    }
+
+    #[test]
+    fn null_sink_mono() {
+        let sink = NullSink::new(22050, 1);
+        assert_eq!(sink.sample_rate(), 22050);
+        assert_eq!(sink.channels(), 1);
+    }
+
+    #[test]
+    fn cpal_sink_audio_sink_trait() {
+        let sink = CpalSink::new_for_test(44100, 2);
+        assert_eq!(sink.sample_rate(), 44100);
+        assert_eq!(sink.channels(), 2);
     }
 }

@@ -56,3 +56,49 @@ impl PlaybackState {
         self.duration_ms.store(ms, Ordering::Relaxed);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playback_state_new_defaults() {
+        let s = PlaybackState::new();
+        assert_eq!(s.get_position_ms(), 0.0);
+        assert!(!s.get_is_playing());
+        assert_eq!(s.get_duration_ms(), 0.0);
+    }
+
+    #[test]
+    fn set_and_get_position_ms() {
+        let s = PlaybackState::new();
+        s.set_position_ms(1234.5);
+        assert_eq!(s.get_position_ms(), 1234.5);
+    }
+
+    #[test]
+    fn set_and_get_is_playing() {
+        let s = PlaybackState::new();
+        s.set_is_playing(true);
+        assert!(s.get_is_playing());
+        s.set_is_playing(false);
+        assert!(!s.get_is_playing());
+    }
+
+    #[test]
+    fn set_and_get_duration_ms() {
+        let s = PlaybackState::new();
+        s.set_duration_ms(99999.0);
+        assert_eq!(s.get_duration_ms(), 99999.0);
+    }
+
+    #[test]
+    fn control_msg_debug_variants() {
+        let _ = format!("{:?}", ControlMsg::Play);
+        let _ = format!("{:?}", ControlMsg::Pause);
+        let _ = format!("{:?}", ControlMsg::Seek(0));
+        let _ = format!("{:?}", ControlMsg::SetSpeed(1.5));
+        let _ = format!("{:?}", ControlMsg::SetLoop(true));
+        let _ = format!("{:?}", ControlMsg::Stop);
+    }
+}

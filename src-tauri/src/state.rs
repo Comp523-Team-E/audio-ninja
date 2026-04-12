@@ -22,3 +22,20 @@ impl AppState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_starts_with_no_engine() {
+        let state = AppState::new();
+        assert!(state.engine.lock().is_none());
+    }
+
+    #[test]
+    fn new_starts_with_empty_marker_store() {
+        let state = AppState::new();
+        assert!(state.markers.lock().list().is_empty());
+    }
+}
