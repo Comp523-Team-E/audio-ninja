@@ -16,6 +16,7 @@
   import MarkerPanel from '../components/MarkerPanel.svelte';
   import SegmentPanel from '../components/SegmentPanel.svelte';
   import ShortcutsPanel from '../components/ShortcutsPanel.svelte';
+  import ErrorAlert from '../components/ErrorAlert.svelte';
 
   onMount(() => {
     document.addEventListener('keydown', handleKeydown);
@@ -28,6 +29,8 @@
     if (appState.wavesurfer) appState.wavesurfer.destroy();
   });
 </script>
+
+<ErrorAlert />
 
 {#if !appState.metadata}
   <WelcomeScreen onOpenFile={openFile} />

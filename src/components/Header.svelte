@@ -26,9 +26,6 @@
     <p class="app-sub">Precision audio/video segmentation tool</p>
   </div>
   <div class="header-right">
-    {#if appState.error}
-      <span class="error-badge">{appState.error}</span>
-    {/if}
     <button class="btn-export" onclick={onOpenFile}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
@@ -108,15 +105,6 @@
     display: flex;
     align-items: center;
     gap: 10px;
-  }
-
-  .error-badge {
-    font-size: 11px;
-    color: #f87171;
-    max-width: 300px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .btn-export {
