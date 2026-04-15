@@ -2,8 +2,9 @@
 # Ensure ffmpeg binaries exist in src-tauri/binaries/ for use as Tauri sidecars.
 #
 # Usage:
-#   ./scripts/download-ffmpeg.sh          # ensure the current host platform binary exists
-#   ./scripts/download-ffmpeg.sh --all    # download/refresh all supported platform binaries (CI)
+#   ./scripts/download-ffmpeg.sh                              # ensure the current host platform binary exists
+#   ./scripts/download-ffmpeg.sh --all                        # download/refresh all supported platform binaries (CI)
+#   ./scripts/download-ffmpeg.sh --target <RUST_TRIPLE>       # download for a specific target triple
 #
 # Supported target triples:
 #   aarch64-apple-darwin       (macOS Apple Silicon)
@@ -283,6 +284,19 @@ detect_and_download_host() {
 # Entry point
 # ---------------------------------------------------------------------------
 
+download_for_target() {
+    local triple="$1"
+    case "$triple" in
+        aarch64-apple-darwin)       download_macos "$triple" ;;
+        x86_64-apple-darwin)        download_macos "$triple" ;;
+        x86_64-unknown-linux-gnu)   download_linux_x64 ;;
+        aarch64-unknown-linux-gnu)  download_linux_arm64 ;;
+        x86_64-pc-windows-msvc)     download_windows_x64 ;;
+        aarch64-pc-windows-msvc)    download_windows_arm64 ;;
+        *) echo "Error: Unsupported target triple: $triple" >&2; exit 1 ;;
+    esac
+}
+
 case "${1:-}" in
     --all)
         log "Downloading for all platforms..."
@@ -294,12 +308,20 @@ case "${1:-}" in
         download_windows_arm64
         log "Done. All binaries written to $BINARIES_DIR/"
         ;;
+    --target)
+        if [[ -z "${2:-}" ]]; then
+            echo "Usage: $0 --target <RUST_TARGET_TRIPLE>" >&2
+            exit 1
+        fi
+        download_for_target "$2"
+        log "Done."
+        ;;
     "")
         detect_and_download_host
         log "Done."
         ;;
     *)
-        echo "Usage: $0 [--all]" >&2
+        echo "Usage: $0 [--all | --target <RUST_TARGET_TRIPLE>]" >&2
         exit 1
         ;;
 esac
