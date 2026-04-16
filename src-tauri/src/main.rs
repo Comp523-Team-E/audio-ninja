@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    media_markup_lib::run()
+    audio_ninja_lib::run()
 }

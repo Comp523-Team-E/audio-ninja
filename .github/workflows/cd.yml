@@ -160,6 +160,10 @@ jobs:
         shell: bash
         run: bash scripts/download-ffmpeg.sh --target ${{ matrix.target }}
 
+      - name: Generate platform icons
+        shell: bash
+        run: bash scripts/ensure-icons.sh
+
       # ── Tauri build & release ────────────────────────────────────────
 
       - name: Build and upload to release (signed)
@@ -173,7 +177,7 @@ jobs:
           APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "media-markup ${{ github.ref_name }}"
+          releaseName: "audio-ninja ${{ github.ref_name }}"
           releaseBody: "See the assets below for download links."
           releaseDraft: true
           prerelease: false
@@ -185,7 +189,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "media-markup ${{ github.ref_name }}"
+          releaseName: "audio-ninja ${{ github.ref_name }}"
           releaseBody: "See the assets below for download links."
           releaseDraft: true
           prerelease: false
