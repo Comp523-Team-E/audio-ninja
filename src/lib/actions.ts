@@ -407,11 +407,31 @@ export async function exportCsv() {
   }
 }
 
-export async function exportAudioSegments() {
+export async function exportAudioSegments(exportCsv: boolean, exportAudio: boolean) {
   try {
     appState.error = null;
-    await invoke('export_audio_segments');
+    await invoke('export_audio_segments', {exportCsv, exportAudio});
   } catch (e) {
     appState.error = String(e);
+  }
+}
+
+export async function importCsv() {
+  try {
+    appState.error = null;
+    const markers = await invoke<Marker[]>('import_csv');
+    appState.markers = markers.sort((a, b) => a.position - b.position);
+    appState.renameInputs = Object.fromEntries(
+      markers.filter(m => m.kind !== 'end').map(m => [m.id, ''])
+    );
+    appState.selectedMarkerId = null;
+    appState.editingMarkerId = null;
+    appState.editingPositionMs = 0;
+    appState.unkindedMarkers = new Set();
+    await revalidate();
+  } catch (e) {
+    if (String(e) !== 'Dialog cancelled') {
+      appState.error = String(e);
+    }
   }
 }
