@@ -220,6 +220,10 @@ export async function setSpeed(s: number) {
   }
 }
 
+export function handleFollowPlayhead(enabled: boolean) {
+  appState.followPlayhead = enabled;
+}
+
 export async function handleLoop(enabled: boolean) {
   appState.looping = enabled;
   try {
