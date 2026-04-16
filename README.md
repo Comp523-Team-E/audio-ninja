@@ -1,4 +1,4 @@
-# Media-Markup
+# Audio Ninja
 
 ## Tauri + SvelteKit + TypeScript
 
