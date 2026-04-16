@@ -60,7 +60,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target }}-release
+          cache-on-failure: true
 
       - name: Install system dependencies (Linux)
         if: matrix.os == 'linux'
