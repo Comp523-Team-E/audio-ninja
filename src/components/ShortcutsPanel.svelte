@@ -86,6 +86,8 @@
     flex-direction: column;
     gap: 6px;
     flex: 1;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   .shortcut-row {

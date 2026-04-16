@@ -123,7 +123,8 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    flex-shrink: 0;
+    flex: 1;
+    min-width: 0;
   }
 
   .controls-label {
@@ -191,6 +192,7 @@
   .toggle-active:hover { background: #1e3f7a; color: #93c5fd; }
 
   .time-display {
+    margin-left: auto;
     font-size: 13px;
     font-variant-numeric: tabular-nums;
     color: #3b82f6;

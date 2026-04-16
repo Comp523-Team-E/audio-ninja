@@ -26,7 +26,7 @@
       progressColor: '#3b82f6',
       cursorColor: '#ffffff',
       cursorWidth: 2,
-      height: 180,
+      height: waveformWrapEl?.clientHeight || 180,
       barWidth: 2,
       barGap: 1,
       barRadius: 2,
@@ -36,7 +36,14 @@
     ws.load(convertFileSrc(filePath));
     appState.wavesurfer = ws;
 
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      const height = Math.round(entry.contentRect.height);
+      if (height > 0) ws.setOptions({ height });
+    });
+    if (waveformWrapEl) resizeObserver.observe(waveformWrapEl);
+
     return () => {
+      resizeObserver.disconnect();
       ws.destroy();
       appState.wavesurfer = null;
     };
@@ -223,7 +230,7 @@
   .waveform-wrap {
     position: relative;
     width: 100%;
-    height: 180px;
+    height: clamp(120px, 24vh, 180px);
     flex-shrink: 0;
     background: #0d1117;
     border-bottom: 1px solid #21262d;
