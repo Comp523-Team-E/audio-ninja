@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { appState } from '$lib/state.svelte';
   import { formatMs, parseTimeMs } from '$lib/utils';
   import { enterEditMode, cancelEditMode, confirmEditMode } from '$lib/actions';
+  import { validationProblemMarkerIds } from '$lib/validation';
   import type { MarkerKind } from '$lib/types';
 
   let { onAddMarkerNoKind, onDeleteMarker, onAddMarkerAt }: {
@@ -14,6 +16,19 @@
   let editInputValue = $state('');
   // True while the user has the edit input focused; suppresses the $effect reset
   let isTyping = false;
+  let compactMarkerTypes = $state(false);
+  let markerListEl = $state<HTMLDivElement | null>(null);
+  const validationProblemIds = $derived(validationProblemMarkerIds(appState.markers, appState.validationError));
+
+  onMount(() => {
+    const media = window.matchMedia('(max-width: 650px)');
+    const updateCompactTypes = () => {
+      compactMarkerTypes = media.matches;
+    };
+    updateCompactTypes();
+    media.addEventListener('change', updateCompactTypes);
+    return () => media.removeEventListener('change', updateCompactTypes);
+  });
 
   // Sync the input display when the draft position changes externally (nudge or mode entry)
   // but not while the user is actively typing in the field.
@@ -21,6 +36,16 @@
     if (appState.editingMarkerId !== null && !isTyping) {
       editInputValue = formatMs(appState.editingPositionMs);
     }
+  });
+
+  $effect(() => {
+    const selectedId = appState.selectedMarkerId;
+    if (!selectedId || !markerListEl) return;
+
+    queueMicrotask(() => {
+      const row = markerListEl?.querySelector<HTMLElement>(`[data-marker-id="${CSS.escape(selectedId)}"]`);
+      row?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
   });
 
 </script>
@@ -36,12 +61,14 @@
       No markers yet. Use the Add Marker button or press <kbd>S</kbd>, <kbd>E</kbd>, or <kbd>B</kbd>.
     </p>
   {:else}
-    <div class="marker-list">
+    <div class="marker-list" bind:this={markerListEl}>
       {#each [...appState.markers].sort((a, b) => b.position - a.position) as m (m.id)}
         <div
           class="marker-row"
           class:marker-row-selected={appState.selectedMarkerId === m.id}
           class:marker-row-editing={appState.editingMarkerId === m.id}
+          class:marker-row-validation-error={validationProblemIds.has(m.id)}
+          data-marker-id={m.id}
           onclick={() => { appState.selectedMarkerId = m.id; }}
           role="button"
           tabindex="0"
@@ -114,11 +141,11 @@
             }}
           >
             {#if appState.unkindedMarkers.has(m.id)}
-              <option value="" disabled selected>Select type…</option>
+              <option value="" disabled selected>{compactMarkerTypes ? 'Type…' : 'Select type…'}</option>
             {/if}
-            <option value="start">Start</option>
-            <option value="end">End</option>
-            <option value="startEnd">Start+End</option>
+            <option value="start">{compactMarkerTypes ? 'S' : 'Start'}</option>
+            <option value="end">{compactMarkerTypes ? 'E' : 'End'}</option>
+            <option value="startEnd">{compactMarkerTypes ? 'S+E' : 'Start+End'}</option>
           </select>
           <button
             class="edit-btn"
@@ -213,15 +240,20 @@
 
   .marker-list {
     flex: 1;
-    overflow-y: auto;
+    overflow: auto;
     padding: 4px 0;
+    min-width: 0;
   }
 
   .marker-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: 8px minmax(86px, 1fr) minmax(64px, 88px) 26px 26px;
     align-items: center;
-    gap: 8px;
+    column-gap: 8px;
     padding: 7px 14px;
+    width: 100%;
+    min-width: max-content;
+    min-height: 41px;
     cursor: pointer;
     border-bottom: 1px solid #161b22;
     transition: background 0.1s;
@@ -243,13 +275,18 @@
   .dot-both   { background: #facc15; }
 
   .marker-time {
-    flex: 1;
     font-variant-numeric: tabular-nums;
     font-size: 12px;
     color: #c9d1d9;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .kind-select {
+    width: 100%;
+    min-width: 0;
     padding: 3px 6px;
     background: #1e2a3a;
     border: 1px solid #30363d;
@@ -286,8 +323,13 @@
 
   .marker-row-editing { background: #1e1a0e !important; border-left: 2px solid #f97316; }
 
+  .marker-row-validation-error {
+    background: rgba(127, 29, 29, 0.22) !important;
+    border-left: 2px solid #f87171;
+  }
+
   .edit-time-input {
-    flex: 1;
+    width: 100%;
     padding: 3px 6px;
     background: #1e2a3a;
     border: 1px solid #f97316;
@@ -316,4 +358,16 @@
 
   .edit-btn:hover { color: #f97316; border-color: #f97316; background: #1e1a0e; }
   .edit-btn-active { color: #f97316; border-color: #f97316; background: #1e1a0e; }
+
+  @media (max-width: 650px) {
+    .marker-row {
+      grid-template-columns: 8px minmax(82px, 1fr) minmax(48px, 56px) 26px 26px;
+      column-gap: 6px;
+    }
+
+    .kind-select {
+      padding-left: 4px;
+      padding-right: 4px;
+    }
+  }
 </style>

@@ -8,6 +8,7 @@ export function resetAppState() {
   appState.markers          = [];
   appState.segments         = null;
   appState.error            = null;
+  appState.successMessage   = null;
   appState.stepMs           = 5000;
   appState.speed            = 1.0;
   appState.looping          = false;

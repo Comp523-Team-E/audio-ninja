@@ -24,7 +24,7 @@ afterEach(() => {
 
 describe('startPolling', () => {
   it('calls get_playback_position after 100ms', async () => {
-    const handler = vi.fn(() => playbackPos(1000));
+    const handler = vi.fn((cmd: string) => cmd === 'get_playback_position' ? playbackPos(1000) : undefined);
     mockIPC(handler);
 
     startPolling();
@@ -98,7 +98,7 @@ describe('stopPolling', () => {
   });
 
   it('stops further polling calls', async () => {
-    const handler = vi.fn(() => playbackPos(0));
+    const handler = vi.fn((cmd: string) => cmd === 'get_playback_position' ? playbackPos(0) : undefined);
     mockIPC(handler);
     startPolling();
     stopPolling();

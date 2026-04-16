@@ -3,9 +3,11 @@
   import WaveSurfer from 'wavesurfer.js';
   import { appState } from '$lib/state.svelte';
   import { kindLabel, formatMs, ZOOM_LEVELS } from '$lib/utils';
+  import { validationProblemMarkerIds } from '$lib/validation';
 
   let waveformEl     = $state<HTMLDivElement | null>(null);
   let waveformWrapEl = $state<HTMLDivElement | null>(null);
+  const validationProblemIds = $derived(validationProblemMarkerIds(appState.markers, appState.validationError));
 
   // Expose the wrap element so external code can scroll it if needed
   $effect(() => { appState.waveformWrapEl = waveformWrapEl; });
@@ -169,12 +171,14 @@
         <!-- Ghost at original position -->
         <div
           class="marker-line marker-ghost"
+          class:marker-validation-error={validationProblemIds.has(m.id)}
           style="left: {origPct}%"
           title="Original — {formatMs(m.position)}"
         ></div>
         <!-- Draft at new position -->
         <div
           class="marker-line marker-editing"
+          class:marker-validation-error={validationProblemIds.has(m.id)}
           style="left: {draftPct}%"
           title="{kindLabel(m.kind)} — {formatMs(appState.editingPositionMs)}"
         ></div>
@@ -182,6 +186,7 @@
         <div
           class="marker-line"
           class:marker-selected={appState.selectedMarkerId === m.id}
+          class:marker-validation-error={validationProblemIds.has(m.id)}
           style="left: {origPct}%"
           title="{kindLabel(m.kind)} — {formatMs(m.position)}"
         ></div>
@@ -279,6 +284,13 @@
     opacity: 1;
     box-shadow: 0 0 8px #f97316;
     animation: editing-pulse 1s ease-in-out infinite alternate;
+  }
+
+  .marker-line.marker-validation-error {
+    background: #f87171;
+    opacity: 1;
+    width: 3px;
+    box-shadow: 0 0 8px rgba(248, 113, 113, 0.85);
   }
 
   @keyframes editing-pulse {

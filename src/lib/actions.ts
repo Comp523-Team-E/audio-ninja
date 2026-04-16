@@ -184,6 +184,7 @@ export async function stepFwd() {
 export async function openFile() {
   try {
     appState.error = null;
+    appState.successMessage = null;
     const meta = await invoke<FileMetadata>('open_file_dialog');
     appState.metadata        = meta;
     appState.durationMs      = meta.durationMs;
@@ -204,6 +205,7 @@ export async function openFile() {
 export async function togglePlay() {
   try {
     appState.error = null;
+    appState.successMessage = null;
     await invoke(appState.isPlaying ? 'pause' : 'play');
   } catch (e) {
     appState.error = String(e);
@@ -214,6 +216,7 @@ export async function setSpeed(s: number) {
   appState.speed = s;
   try {
     appState.error = null;
+    appState.successMessage = null;
     await invoke('set_speed', { speed: s });
   } catch (e) {
     appState.error = String(e);
@@ -228,6 +231,7 @@ export async function handleLoop(enabled: boolean) {
   appState.looping = enabled;
   try {
     appState.error = null;
+    appState.successMessage = null;
     await invoke('set_loop', { enabled });
   } catch (e) {
     appState.error = String(e);
@@ -241,6 +245,7 @@ export async function addMarker(kind: MarkerKind) {
 export async function addMarkerNoKind() {
   try {
     appState.error = null;
+    appState.successMessage = null;
     const m = await invoke<Marker>('add_marker', {
       positionMs: Math.round(appState.positionMs),
       kind: 'start',
@@ -258,6 +263,7 @@ export async function addMarkerNoKind() {
 export async function addMarkerAt(kind: MarkerKind, posMs: number) {
   try {
     appState.error = null;
+    appState.successMessage = null;
     const m = await invoke<Marker>('add_marker', {
       positionMs: Math.round(posMs),
       kind,
@@ -276,6 +282,7 @@ export async function addMarkerAt(kind: MarkerKind, posMs: number) {
 export async function deleteMarker(id: string) {
   try {
     appState.error = null;
+    appState.successMessage = null;
     await invoke('delete_marker', { id });
     appState.markers = appState.markers.filter(m => m.id !== id);
     const updated = { ...appState.renameInputs };
@@ -317,6 +324,7 @@ export async function confirmEditMode() {
   appState.editingPositionMs = 0;
   try {
     appState.error = null;
+    appState.successMessage = null;
     await invoke('move_marker', { id, newPositionMs: positionMs });
     appState.markers = appState.markers
       .map(m => m.id === id ? { ...m, position: positionMs } : m)
@@ -372,6 +380,7 @@ export function computePreviewSegments(): Segment[] {
 export async function renameSegment(anchorId: string) {
   try {
     appState.error = null;
+    appState.successMessage = null;
     const title = appState.renameInputs[anchorId] ?? '';
     await invoke('rename_segment', { anchorId, title });
     await revalidate();
@@ -421,7 +430,9 @@ export async function revalidate() {
 export async function exportCsv() {
   try {
     appState.error = null;
+    appState.successMessage = null;
     await invoke('export_csv');
+    appState.successMessage = 'CSV exported successfully.';
   } catch (e) {
     appState.error = String(e);
   }
@@ -430,7 +441,11 @@ export async function exportCsv() {
 export async function exportAudioSegments(exportCsv: boolean, exportAudio: boolean) {
   try {
     appState.error = null;
+    appState.successMessage = null;
     await invoke('export_audio_segments', {exportCsv, exportAudio});
+    if (exportCsv && exportAudio) appState.successMessage = 'CSV and audio segments exported successfully.';
+    else if (exportCsv) appState.successMessage = 'CSV exported successfully.';
+    else if (exportAudio) appState.successMessage = 'Audio segments exported successfully.';
   } catch (e) {
     appState.error = String(e);
   }
@@ -439,6 +454,7 @@ export async function exportAudioSegments(exportCsv: boolean, exportAudio: boole
 export async function importCsv() {
   try {
     appState.error = null;
+    appState.successMessage = null;
     const markers = await invoke<Marker[]>('import_csv');
     appState.markers = markers.sort((a, b) => a.position - b.position);
     appState.renameInputs = Object.fromEntries(

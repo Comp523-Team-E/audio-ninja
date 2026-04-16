@@ -163,13 +163,13 @@ describe('exportAudioSegments', () => {
   it('calls export_audio_segments command', async () => {
     const handler = vi.fn(() => undefined);
     mockIPC(handler);
-    await exportAudioSegments();
-    expect(handler).toHaveBeenCalledWith('export_audio_segments', expect.anything());
+    await exportAudioSegments(true, true);
+    expect(handler).toHaveBeenCalledWith('export_audio_segments', { exportCsv: true, exportAudio: true });
   });
 
   it('sets appState.error when invoke throws', async () => {
     mockIPC(() => { throw new Error('export failed'); });
-    await exportAudioSegments();
+    await exportAudioSegments(true, true);
     expect(appState.error).toMatch('export failed');
   });
 });
