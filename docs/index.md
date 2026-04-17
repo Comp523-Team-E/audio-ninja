@@ -1,0 +1,3 @@
+# Docs 
+
+The documentation for audio ninja is split into two distinct parts, user docs and developer documentation. User documentation can be found at [user docs](user-documentation/index.md). Developer documentation can be found at [developer docs](developer-documentation/index.md). As changes are made to the application and new features are added, these docs will be updated to reflect the changes. 
