@@ -10,6 +10,11 @@
   let exportDropdownOpen = $state(false);
   let exportCsv = $state(true);
   let exportAudio = $state(true);
+  const fileFormat = $derived((() => {
+    const fileName = appState.metadata?.fileName ?? '';
+    const dot = fileName.lastIndexOf('.');
+    return dot >= 0 && dot < fileName.length - 1 ? fileName.slice(dot + 1).toUpperCase() : 'MEDIA';
+  })());
 
   function toggleDropdown() {
     exportDropdownOpen = !exportDropdownOpen;
@@ -22,8 +27,11 @@
 
 <header class="header">
   <div class="header-left">
-    <h1 class="app-title">Media Segment Marker</h1>
-    <p class="app-sub">Precision audio/video segmentation tool</p>
+    <h1 class="app-title">Audio Ninja</h1>
+    <p class="app-sub">
+      <span class="file-name" title={appState.metadata?.fileName}>{appState.metadata?.fileName}</span>
+      <span class="file-format">{fileFormat}</span>
+    </p>
   </div>
   <div class="header-right">
     <button class="btn-export" onclick={onOpenFile}>
@@ -80,14 +88,19 @@
 </header>
 
 <style>
-  .header {
-    display: flex;
-    align-items: center;
+	  .header {
+	    display: flex;
+	    align-items: center;
     justify-content: space-between;
     padding: 10px 16px;
     border-bottom: 1px solid #21262d;
-    flex-shrink: 0;
-  }
+	    flex-shrink: 0;
+	  }
+
+	  .header-left {
+	    min-width: 0;
+	    flex: 1;
+	  }
 
   .app-title {
     font-size: 16px;
@@ -95,11 +108,33 @@
     color: #e2e8f0;
   }
 
-  .app-sub {
-    font-size: 11px;
-    color: #8b949e;
-    margin-top: 1px;
-  }
+	  .app-sub {
+	    display: flex;
+	    align-items: center;
+	    gap: 8px;
+	    min-width: 0;
+	    font-size: 11px;
+	    color: #8b949e;
+	    margin-top: 1px;
+	  }
+
+	  .file-name {
+	    min-width: 0;
+	    overflow: hidden;
+	    text-overflow: ellipsis;
+	    white-space: nowrap;
+	  }
+
+	  .file-format {
+	    flex-shrink: 0;
+	    padding: 1px 5px;
+	    background: #1e2a3a;
+	    border: 1px solid #30363d;
+	    border-radius: 5px;
+	    color: #c9d1d9;
+	    font-size: 10px;
+	    font-weight: 600;
+	  }
 
   .header-right {
     display: flex;

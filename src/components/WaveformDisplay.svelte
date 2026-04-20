@@ -3,9 +3,11 @@
   import WaveSurfer from 'wavesurfer.js';
   import { appState } from '$lib/state.svelte';
   import { kindLabel, formatMs, ZOOM_LEVELS } from '$lib/utils';
+  import { validationProblemMarkerIds } from '$lib/validation';
 
   let waveformEl     = $state<HTMLDivElement | null>(null);
   let waveformWrapEl = $state<HTMLDivElement | null>(null);
+  const validationProblemIds = $derived(validationProblemMarkerIds(appState.markers, appState.validationError));
 
   // Expose the wrap element so external code can scroll it if needed
   $effect(() => { appState.waveformWrapEl = waveformWrapEl; });
@@ -26,7 +28,7 @@
       progressColor: '#3b82f6',
       cursorColor: '#ffffff',
       cursorWidth: 2,
-      height: 180,
+      height: waveformWrapEl?.clientHeight || 180,
       barWidth: 2,
       barGap: 1,
       barRadius: 2,
@@ -36,7 +38,14 @@
     ws.load(convertFileSrc(filePath));
     appState.wavesurfer = ws;
 
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      const height = Math.round(entry.contentRect.height);
+      if (height > 0) ws.setOptions({ height });
+    });
+    if (waveformWrapEl) resizeObserver.observe(waveformWrapEl);
+
     return () => {
+      resizeObserver.disconnect();
       ws.destroy();
       appState.wavesurfer = null;
     };
@@ -162,12 +171,14 @@
         <!-- Ghost at original position -->
         <div
           class="marker-line marker-ghost"
+          class:marker-validation-error={validationProblemIds.has(m.id)}
           style="left: {origPct}%"
           title="Original — {formatMs(m.position)}"
         ></div>
         <!-- Draft at new position -->
         <div
           class="marker-line marker-editing"
+          class:marker-validation-error={validationProblemIds.has(m.id)}
           style="left: {draftPct}%"
           title="{kindLabel(m.kind)} — {formatMs(appState.editingPositionMs)}"
         ></div>
@@ -175,6 +186,7 @@
         <div
           class="marker-line"
           class:marker-selected={appState.selectedMarkerId === m.id}
+          class:marker-validation-error={validationProblemIds.has(m.id)}
           style="left: {origPct}%"
           title="{kindLabel(m.kind)} — {formatMs(m.position)}"
         ></div>
@@ -223,7 +235,7 @@
   .waveform-wrap {
     position: relative;
     width: 100%;
-    height: 180px;
+    height: clamp(120px, 24vh, 180px);
     flex-shrink: 0;
     background: #0d1117;
     border-bottom: 1px solid #21262d;
@@ -272,6 +284,13 @@
     opacity: 1;
     box-shadow: 0 0 8px #f97316;
     animation: editing-pulse 1s ease-in-out infinite alternate;
+  }
+
+  .marker-line.marker-validation-error {
+    background: #f87171;
+    opacity: 1;
+    width: 3px;
+    box-shadow: 0 0 8px rgba(248, 113, 113, 0.85);
   }
 
   @keyframes editing-pulse {

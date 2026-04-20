@@ -17,13 +17,26 @@
   import SegmentPanel from '../components/SegmentPanel.svelte';
   import ShortcutsPanel from '../components/ShortcutsPanel.svelte';
   import ErrorAlert from '../components/ErrorAlert.svelte';
+  import SuccessToast from '../components/SuccessToast.svelte';
+
+  let shortcutsCollapsed = $state(false);
 
   onMount(() => {
     document.addEventListener('keydown', handleKeydown);
+    const media = window.matchMedia('(max-width: 900px)');
+    const syncShortcutsLayout = () => {
+      shortcutsCollapsed = media.matches;
+    };
+    syncShortcutsLayout();
+    media.addEventListener('change', syncShortcutsLayout);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeydown);
+      media.removeEventListener('change', syncShortcutsLayout);
+    };
   });
 
   onDestroy(() => {
-    document.removeEventListener('keydown', handleKeydown);
     stopPolling();
     stopRaf();
     if (appState.wavesurfer) appState.wavesurfer.destroy();
@@ -31,6 +44,7 @@
 </script>
 
 <ErrorAlert />
+<SuccessToast />
 
 {#if !appState.metadata}
   <WelcomeScreen onOpenFile={openFile} />
@@ -49,15 +63,18 @@
       onToggleLoop={handleLoop}
       onToggleFollow={handleFollowPlayhead}
     />
-    <div class="panels">
-      <MarkerPanel
-        onAddMarkerNoKind={addMarkerNoKind}
-        onDeleteMarker={deleteMarker}
-        onAddMarkerAt={addMarkerAt}
-      />
-      <SegmentPanel onRenameSegment={renameSegment} />
-      <ShortcutsPanel />
-    </div>
+	    <div class="panels" class:shortcuts-collapsed={shortcutsCollapsed}>
+	      <MarkerPanel
+	        onAddMarkerNoKind={addMarkerNoKind}
+	        onDeleteMarker={deleteMarker}
+	        onAddMarkerAt={addMarkerAt}
+	      />
+	      <SegmentPanel onRenameSegment={renameSegment} />
+	      <ShortcutsPanel
+	        collapsed={shortcutsCollapsed}
+	        onToggleCollapsed={() => { shortcutsCollapsed = !shortcutsCollapsed; }}
+	      />
+	    </div>
   </div>
 {/if}
 
@@ -85,13 +102,27 @@
     overflow: hidden;
   }
 
-  .panels {
-    display: grid;
-    grid-template-columns: 1fr 2fr 1fr;
-    flex: 1;
-    overflow: hidden;
-    min-height: 0;
-  }
+	  .panels {
+	    display: grid;
+	    grid-template-columns: minmax(180px, 1fr) minmax(260px, 2fr) minmax(180px, 1fr);
+	    flex: 1;
+	    overflow: hidden;
+	    min-height: 0;
+	  }
+
+	  .panels.shortcuts-collapsed {
+	    grid-template-columns: minmax(180px, 1fr) minmax(260px, 2fr) 58px;
+	  }
+
+	  @media (max-width: 900px) {
+	    .panels {
+	      grid-template-columns: minmax(160px, 1fr) minmax(240px, 2fr) minmax(170px, 0.9fr);
+	    }
+
+	    .panels.shortcuts-collapsed {
+	      grid-template-columns: minmax(160px, 1fr) minmax(240px, 2fr) 58px;
+	    }
+	  }
 
   :global(::-webkit-scrollbar) { width: 6px; }
   :global(::-webkit-scrollbar-track) { background: transparent; }

@@ -10,6 +10,7 @@ class AppState {
   markers         = $state<Marker[]>([]);
   segments        = $state<Segment[] | null>(null);
   error           = $state<string | null>(null);
+  successMessage  = $state<string | null>(null);
   stepMs          = $state(5000);
   speed           = $state(1.0);
   looping         = $state(false);
