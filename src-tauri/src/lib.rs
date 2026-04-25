@@ -35,6 +35,8 @@ pub fn run() {
             commands::validate_markers,
             commands::import_csv,
             commands::export_audio_segments,
+            commands::read_shortcuts_config,
+            commands::write_shortcuts_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { appState } from './state.svelte';
 import { SPEEDS, ZOOM_LEVELS } from './utils';
+import { DEFAULT_SHORTCUTS, matchesShortcut } from './shortcuts';
+import type { ShortcutConfig } from './shortcuts';
 import type { FileMetadata, PlaybackPosition, Marker, Segment, MarkerKind } from './types';
 
 // ── Position polling + interpolation ─────────────────────────────────────
@@ -59,85 +61,81 @@ export function stopRaf() {
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────
 
+export async function loadShortcuts(): Promise<void> {
+  try {
+    const raw = await invoke<string | null>('read_shortcuts_config');
+    if (raw) {
+      const saved = JSON.parse(raw) as Partial<ShortcutConfig>;
+      appState.shortcuts = { ...DEFAULT_SHORTCUTS, ...saved };
+    }
+  } catch {
+    // File missing or malformed — keep defaults
+  }
+}
+
+export async function saveShortcuts(config: ShortcutConfig): Promise<void> {
+  await invoke('write_shortcuts_config', { config: JSON.stringify(config) });
+}
+
 export function handleKeydown(e: KeyboardEvent) {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
   if (!appState.metadata) return;
 
-  if (e.key === 'Escape' && appState.editingMarkerId) {
-    e.preventDefault();
-    cancelEditMode();
-    return;
-  }
-  if (e.key === 'Enter' && appState.editingMarkerId) {
-    e.preventDefault();
-    confirmEditMode();
-    return;
+  const s = appState.shortcuts;
+
+  if (appState.editingMarkerId) {
+    if (matchesShortcut(e, s.cancelEdit))  { e.preventDefault(); cancelEditMode(); return; }
+    if (matchesShortcut(e, s.confirmEdit)) { e.preventDefault(); confirmEditMode(); return; }
   }
 
-  if (e.code === 'Space') {
-    e.preventDefault();
-    togglePlay();
-  } else if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
-    e.preventDefault();
-    exportCsv();
-  } else if (e.key === '[') {
-    e.preventDefault();
-    nudgeMarker(-1);
-  } else if (e.key === ']') {
-    e.preventDefault();
-    nudgeMarker(1);
-  } else if (e.key === 's' || e.key === 'S') {
-    e.preventDefault();
-    addMarker('start');
-  } else if (e.key === 'e' || e.key === 'E') {
-    e.preventDefault();
-    addMarker('end');
-  } else if (e.key === 'b' || e.key === 'B') {
-    e.preventDefault();
-    addMarker('startEnd');
-  } else if (e.key === 'x' || e.key === 'X') {
-    if (appState.selectedMarkerId) {
-      const m = appState.markers.find(mk => mk.id === appState.selectedMarkerId);
-      if (m?.kind === 'startEnd') {
-        e.preventDefault();
-        splitStartEndMarker(appState.selectedMarkerId);
-      }
-    }
-  } else if (e.key === 'Delete' || e.key === 'Backspace') {
-    if (appState.selectedMarkerId) {
-      e.preventDefault();
-      deleteMarker(appState.selectedMarkerId);
-    }
-  } else if (e.key === 'ArrowRight') {
-    e.preventDefault();
-    stepFwd();
-  } else if (e.key === 'ArrowLeft') {
-    e.preventDefault();
-    stepBack();
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    seekToEnd()
-  } else if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    seekToStart()
-  } else if (e.key === 'l' || e.key === 'L') {
-    e.preventDefault();
-    appState.followPlayhead = !appState.followPlayhead;
-  } else if (e.key === 'd' || e.key === 'D') {
-    e.preventDefault();
-    seekToPrevMarker();
-  } else if (e.key === 'f' || e.key === 'F') {
-    e.preventDefault();
-    seekToNextMarker();
-  } else if (e.key >= '1' && e.key <= '5') {
-    e.preventDefault();
-    const idx = parseInt(e.key) - 1;
-    if (SPEEDS[idx] !== undefined) setSpeed(SPEEDS[idx]);
-  } else if (e.key === '-') {
+  if (matchesShortcut(e, s.togglePlay)) {
+    e.preventDefault(); togglePlay();
+  } else if (matchesShortcut(e, s.exportCsv)) {
+    e.preventDefault(); exportCsv();
+  } else if (matchesShortcut(e, s.nudgeLeft)) {
+    e.preventDefault(); nudgeMarker(-1);
+  } else if (matchesShortcut(e, s.nudgeRight)) {
+    e.preventDefault(); nudgeMarker(1);
+  } else if (matchesShortcut(e, s.addStartMarker)) {
+    e.preventDefault(); addMarker('start');
+  } else if (matchesShortcut(e, s.addEndMarker)) {
+    e.preventDefault(); addMarker('end');
+  } else if (matchesShortcut(e, s.addStartEndMarker)) {
+    e.preventDefault(); addMarker('startEnd');
+  } else if (matchesShortcut(e, s.splitStartEndMarker) && appState.selectedMarkerId) {
+    const m = appState.markers.find(mk => mk.id === appState.selectedMarkerId);
+    if (m?.kind === 'startEnd') { e.preventDefault(); splitStartEndMarker(appState.selectedMarkerId); }
+  } else if (matchesShortcut(e, s.deleteMarker) && appState.selectedMarkerId) {
+    e.preventDefault(); deleteMarker(appState.selectedMarkerId);
+  } else if (matchesShortcut(e, s.stepForward)) {
+    e.preventDefault(); stepFwd();
+  } else if (matchesShortcut(e, s.stepBackward)) {
+    e.preventDefault(); stepBack();
+  } else if (matchesShortcut(e, s.seekToEnd)) {
+    e.preventDefault(); seekToEnd();
+  } else if (matchesShortcut(e, s.seekToStart)) {
+    e.preventDefault(); seekToStart();
+  } else if (matchesShortcut(e, s.toggleFollowPlayhead)) {
+    e.preventDefault(); appState.followPlayhead = !appState.followPlayhead;
+  } else if (matchesShortcut(e, s.seekToPrevMarker)) {
+    e.preventDefault(); seekToPrevMarker();
+  } else if (matchesShortcut(e, s.seekToNextMarker)) {
+    e.preventDefault(); seekToNextMarker();
+  } else if (matchesShortcut(e, s.setSpeed1)) {
+    e.preventDefault(); setSpeed(SPEEDS[0]);
+  } else if (matchesShortcut(e, s.setSpeed2)) {
+    e.preventDefault(); setSpeed(SPEEDS[1]);
+  } else if (matchesShortcut(e, s.setSpeed3)) {
+    e.preventDefault(); setSpeed(SPEEDS[2]);
+  } else if (matchesShortcut(e, s.setSpeed4)) {
+    e.preventDefault(); setSpeed(SPEEDS[3]);
+  } else if (matchesShortcut(e, s.setSpeed5)) {
+    e.preventDefault(); setSpeed(SPEEDS[4]);
+  } else if (matchesShortcut(e, s.zoomOut)) {
     e.preventDefault();
     const i = ZOOM_LEVELS.indexOf(appState.zoomLevel);
     if (i > 0) appState.zoomLevel = ZOOM_LEVELS[i - 1];
-  } else if (e.key === '+' || e.key === '=') {
+  } else if (matchesShortcut(e, s.zoomIn)) {
     e.preventDefault();
     const i = ZOOM_LEVELS.indexOf(appState.zoomLevel);
     if (i < ZOOM_LEVELS.length - 1) appState.zoomLevel = ZOOM_LEVELS[i + 1];

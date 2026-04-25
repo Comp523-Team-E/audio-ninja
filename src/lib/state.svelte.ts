@@ -1,5 +1,7 @@
 import type WaveSurfer from 'wavesurfer.js';
 import type { FileMetadata, Marker, Segment } from './types';
+import { DEFAULT_SHORTCUTS } from './shortcuts';
+import type { ShortcutConfig } from './shortcuts';
 
 class AppState {
   // ── Displayed in UI (reactive) ─────────────────────────────────────────
@@ -22,6 +24,7 @@ class AppState {
   editingPositionMs = $state(0);
   nudgeStepMs       = 100;
   unkindedMarkers = $state<Set<string>>(new Set());
+  shortcuts = $state<ShortcutConfig>({ ...DEFAULT_SHORTCUTS });
   // Lets the RAF in +page.svelte skip interpolation during waveform drag
   waveformDragging = $state(false);
 

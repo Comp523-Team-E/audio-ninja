@@ -150,7 +150,7 @@ describe('handleKeydown — markers', () => {
     expect(handler).toHaveBeenCalledWith('delete_marker', { id: 'm1' });
   });
 
-  it('Backspace deletes the selected marker', async () => {
+  it('Backspace also deletes the selected marker (default multi-key bind)', async () => {
     appState.markers = [{ id: 'm1', position: 1000, kind: 'start' }];
     appState.selectedMarkerId = 'm1';
     const handler = vi.fn(() => undefined);
@@ -410,15 +410,15 @@ describe('handleKeydown — zoom', () => {
     expect(appState.zoomLevel).toBe(1);
   });
 
-  it('+ key increments zoom level', () => {
+  it('= key increments zoom level', () => {
     appState.zoomLevel = 2;
-    handleKeydown(keyEvent('+'));
+    handleKeydown(keyEvent('='));
     expect(appState.zoomLevel).toBe(4);
   });
 
-  it('= key also increments zoom level (unshifted + key)', () => {
+  it('+ key also increments zoom level (default multi-key bind)', () => {
     appState.zoomLevel = 2;
-    handleKeydown(keyEvent('='));
+    handleKeydown(keyEvent('+'));
     expect(appState.zoomLevel).toBe(4);
   });
 
@@ -428,7 +428,16 @@ describe('handleKeydown — zoom', () => {
     expect(appState.zoomLevel).toBe(16);
   });
 
-  it('stepping through all levels with + reaches maximum', () => {
+  it('stepping through all levels with = reaches maximum', () => {
+    appState.zoomLevel = 1;
+    handleKeydown(keyEvent('='));
+    handleKeydown(keyEvent('='));
+    handleKeydown(keyEvent('='));
+    handleKeydown(keyEvent('='));
+    expect(appState.zoomLevel).toBe(16);
+  });
+
+  it('stepping through all levels with + also reaches maximum', () => {
     appState.zoomLevel = 1;
     handleKeydown(keyEvent('+'));
     handleKeydown(keyEvent('+'));
@@ -462,5 +471,53 @@ describe('handleKeydown — export', () => {
     handleKeydown(keyEvent('e', { metaKey: true }));
     await flush();
     expect(handler).toHaveBeenCalledWith('export_csv', expect.anything());
+  });
+});
+
+describe('handleKeydown — custom shortcuts config', () => {
+  it('respects a remapped togglePlay key', async () => {
+    appState.shortcuts = { ...appState.shortcuts, togglePlay: [{ key: 'p' }] };
+    appState.isPlaying = false;
+    const handler = vi.fn(() => undefined);
+    mockIPC(handler);
+    handleKeydown(keyEvent('p'));
+    await flush();
+    expect(handler).toHaveBeenCalledWith('play', expect.anything());
+  });
+
+  it('default Space no longer triggers play after remapping', async () => {
+    appState.shortcuts = { ...appState.shortcuts, togglePlay: [{ key: 'p' }] };
+    appState.isPlaying = false;
+    const handler = vi.fn(() => undefined);
+    mockIPC(handler);
+    handleKeydown(keyEvent(' '));
+    await flush();
+    expect(handler).not.toHaveBeenCalledWith('play', expect.anything());
+  });
+
+  it('supports multi-key binds — both keys trigger the action', async () => {
+    appState.shortcuts = { ...appState.shortcuts, togglePlay: [{ key: 'p' }, { key: 'q' }] };
+    appState.isPlaying = false;
+    const handler = vi.fn(() => undefined);
+    mockIPC(handler);
+    handleKeydown(keyEvent('q'));
+    await flush();
+    expect(handler).toHaveBeenCalledWith('play', expect.anything());
+  });
+
+  it('cancelEdit respects custom key', () => {
+    appState.shortcuts = { ...appState.shortcuts, cancelEdit: [{ key: 'q' }] };
+    appState.editingMarkerId = 'm1';
+    appState.editingPositionMs = 5000;
+    handleKeydown(keyEvent('q'));
+    expect(appState.editingMarkerId).toBeNull();
+  });
+
+  it('default Escape no longer cancels edit after remapping', () => {
+    appState.shortcuts = { ...appState.shortcuts, cancelEdit: [{ key: 'q' }] };
+    appState.editingMarkerId = 'm1';
+    appState.editingPositionMs = 5000;
+    handleKeydown(keyEvent('Escape'));
+    expect(appState.editingMarkerId).toBe('m1');
   });
 });
