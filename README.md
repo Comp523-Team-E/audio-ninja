@@ -30,7 +30,6 @@ Audio Ninja is a [Tauri v2](https://v2.tauri.app/) desktop application with a [S
 
 Install the required tools first:
 
-- [Git](https://git-scm.com/downloads)
 - [Node.js](https://nodejs.org/) v18 or newer, which includes `npm`
 - [Rust](https://www.rust-lang.org/tools/install), installed through `rustup`
 - [Tauri v2 system prerequisites](https://v2.tauri.app/start/prerequisites/) for your operating system
@@ -43,7 +42,7 @@ Then clone and run the app:
 git clone https://github.com/Comp523-Team-E/audio-ninja.git
 cd audio-ninja
 npm install
-npm run tauri -- dev
+npm run tauri dev
 ```
 
 The Tauri development command starts the Svelte frontend, builds the Rust backend, and opens the desktop app. It also runs the FFmpeg sidecar setup script automatically. If you need to refresh FFmpeg manually, run:
@@ -65,7 +64,7 @@ Rust backend tests are run from the Tauri project directory:
 
 ```bash
 cd src-tauri
-cargo test --features test-audio
+cargo test
 ```
 
 For more detailed setup, build, and testing notes, see the [developer documentation](docs/developer-documentation/index.md), especially [Building](docs/developer-documentation/building.md) and [Testing](docs/developer-documentation/testing.md).

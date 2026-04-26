@@ -24,6 +24,10 @@ At a high level:
 3. Rust command handlers in `src-tauri/src/commands.rs` operate on shared `AppState`.
 4. Backend modules under `src-tauri/src/` perform audio playback, marker storage/validation, CSV import/export, and FFmpeg-based segment export.
 
+![Audio Ninja architecture diagram](../../static/architecture-diagram.png)
+
+Frontend state flows through Tauri into Rust services.
+
 ## Source Tree
 
 ```text
@@ -85,6 +89,8 @@ See [Testing](testing.md) for commands.
 ## Backend Structure
 
 The Tauri/Rust backend lives in `src-tauri/`.
+
+When trying to find backend behavior, start with `src-tauri/src/lib.rs`. It lists every frontend-callable command registered with Tauri. From there, jump to the matching function in `src-tauri/src/commands.rs`, then follow that function into the audio, marker, export, or state module it uses. This is usually the fastest way to trace how a user action reaches the Rust code.
 
 ### Tauri Entry Points
 
@@ -453,4 +459,4 @@ Use the Linux dependency list in `.github/workflows/ci.yml` and `.github/workflo
 - Prefer adding tests near the logic being changed: frontend action tests for UI behavior, Rust unit tests for backend logic.
 - Keep generated files out of hand edits. Edit source files, then regenerate through normal build/test commands.
 - Update `README.md`, user docs, or developer docs whenever a user-visible workflow, install step, command, or supported file format changes.
-- When changing bundle behavior, test both `npm run tauri -- dev` and `npm run tauri -- build`.
+- When changing bundle behavior, test both `npm run tauri dev` and `npm run tauri build`.
