@@ -3,6 +3,7 @@
   import { appState } from '$lib/state.svelte';
   import { formatMs, parseTimeMs } from '$lib/utils';
   import { selectMarker, enterEditMode, cancelEditMode, confirmEditMode } from '$lib/actions';
+  import { formatShortcutKey } from '$lib/shortcuts';
   import { validationProblemMarkerIds } from '$lib/validation';
   import type { MarkerKind } from '$lib/types';
 
@@ -59,7 +60,7 @@
 
   {#if appState.markers.length === 0}
     <p class="empty-state">
-      No markers yet. Use the Add Marker button or press <kbd>S</kbd>, <kbd>E</kbd>, or <kbd>B</kbd>.
+      No markers yet. Use the Add Marker button or press <kbd>{formatShortcutKey(appState.shortcuts.addStartMarker[0])}</kbd>, <kbd>{formatShortcutKey(appState.shortcuts.addEndMarker[0])}</kbd>, or <kbd>{formatShortcutKey(appState.shortcuts.addStartEndMarker[0])}</kbd>.
     </p>
   {:else}
     <div class="marker-list" bind:this={markerListEl}>

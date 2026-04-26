@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { appState } from '$lib/state.svelte';
   import {
-    stopPolling, stopRaf, handleKeydown,
+    stopPolling, stopRaf, handleKeydown, loadShortcuts,
     openFile, importCsv, togglePlay, setSpeed, handleLoop,
     addMarkerNoKind, addMarkerAt, deleteMarker, splitStartEndMarker,
     renameSegment, exportAudioSegments,
@@ -22,6 +22,7 @@
   let shortcutsCollapsed = $state(false);
 
   onMount(() => {
+    loadShortcuts();
     document.addEventListener('keydown', handleKeydown);
     const media = window.matchMedia('(max-width: 900px)');
     const syncShortcutsLayout = () => {

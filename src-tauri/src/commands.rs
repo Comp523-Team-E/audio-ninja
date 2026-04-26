@@ -1,4 +1,4 @@
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use uuid::Uuid;
 
 use crate::audio::{AudioEngine, FileMetadata};
@@ -303,6 +303,35 @@ pub async fn export_audio_segments(
         .ok_or_else(|| AppError::ValidationError("Invalid output directory path".into()))?;
 
     export_segments(&app, &source_path, &segments, output_path, export_csv, export_audio).await
+}
+
+// ---------------------------------------------------------------------------
+// Shortcuts config
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn read_shortcuts_config(app: AppHandle) -> Result<Option<String>> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    let path = config_dir.join("shortcuts.json");
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(path)?;
+    Ok(Some(content))
+}
+
+#[tauri::command]
+pub fn write_shortcuts_config(app: AppHandle, config: String) -> Result<()> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+    std::fs::create_dir_all(&config_dir)?;
+    std::fs::write(config_dir.join("shortcuts.json"), config)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

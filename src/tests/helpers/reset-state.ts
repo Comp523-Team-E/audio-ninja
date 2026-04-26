@@ -1,4 +1,5 @@
 import { appState } from '$lib/state.svelte';
+import { DEFAULT_SHORTCUTS } from '$lib/shortcuts';
 
 export function resetAppState() {
   appState.metadata         = null;
@@ -25,4 +26,5 @@ export function resetAppState() {
   appState.wavesurfer       = null;
   appState.zoomLevel        = 1;
   appState.waveformWrapEl   = null;
+  appState.shortcuts        = { ...DEFAULT_SHORTCUTS };
 }
