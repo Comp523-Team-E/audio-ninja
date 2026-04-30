@@ -265,7 +265,7 @@
     disabled={!appState.metadata || appState.zoomLevel <= minZoomForFile}
     title="Zoom out"
   >−</button>
-  <span class="zoom-label">{zoomWindowLabel}</span>
+  <span class="zoom-label">{zoomWindowLabel}s</span>
   <button
     class="zoom-btn"
     onclick={handleZoomInClick}
