@@ -221,7 +221,10 @@ export async function openFile() {
   try {
     appState.error = null;
     appState.successMessage = null;
-    const meta = await invoke<FileMetadata>('open_file_dialog');
+    const meta = await invoke<FileMetadata | null>('open_file_dialog');
+    // The backend returns `null` (Rust `Ok(None)`) when the user dismisses the
+    // native file picker — treat that as a no-op rather than an error.
+    if (meta == null) return;
     appState.metadata        = meta;
     appState.durationMs      = meta.durationMs;
     appState.positionMs      = 0;
@@ -499,7 +502,8 @@ export async function exportAudioSegments(exportCsv: boolean, exportAudio: boole
   try {
     appState.error = null;
     appState.successMessage = null;
-    await invoke('export_audio_segments', {exportCsv, exportAudio});
+    const count = await invoke<number | null>('export_audio_segments', {exportCsv, exportAudio});
+    if (count === null) return; // user cancelled the folder picker
     if (exportCsv && exportAudio) appState.successMessage = 'CSV and audio segments exported successfully.';
     else if (exportCsv) appState.successMessage = 'CSV exported successfully.';
     else if (exportAudio) appState.successMessage = 'Audio segments exported successfully.';
@@ -512,7 +516,8 @@ export async function importCsv() {
   try {
     appState.error = null;
     appState.successMessage = null;
-    const markers = await invoke<Marker[]>('import_csv');
+    const markers = await invoke<Marker[] | null>('import_csv');
+    if (!markers) return; // user cancelled the file picker
     appState.markers = markers.sort((a, b) => a.position - b.position);
     appState.renameInputs = Object.fromEntries(
       markers.filter(m => m.kind !== 'end').map(m => [m.id, ''])
@@ -523,8 +528,6 @@ export async function importCsv() {
     appState.unkindedMarkers = new Set();
     await revalidate();
   } catch (e) {
-    if (String(e) !== 'Dialog cancelled') {
-      appState.error = String(e);
-    }
+    appState.error = String(e);
   }
 }

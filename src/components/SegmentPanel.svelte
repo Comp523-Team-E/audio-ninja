@@ -17,7 +17,7 @@
   </div>
 
   {#if appState.validationError}
-    <p class="validation-error">{appState.validationError}</p>
+    <p class="validation-error copyable-text">{appState.validationError}</p>
   {/if}
 
   {#if displaySegments.length === 0}

@@ -20,7 +20,7 @@
     <h2>Open a media file to begin</h2>
     <p class="upload-formats">Supported formats: MP4, MP3, WAV, FLAC, OGG, AAC</p>
     {#if appState.error}
-      <p class="error-text">{appState.error}</p>
+      <p class="error-text copyable-text">{appState.error}</p>
     {/if}
     <button class="btn-primary" onclick={onOpenFile}>Choose File</button>
   </div>

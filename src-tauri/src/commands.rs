@@ -40,23 +40,28 @@ pub async fn open_file(
 }
 
 /// Show the native file-open dialog, then open the chosen file.
+///
+/// Returns `Ok(None)` when the user closes the dialog without picking a file —
+/// cancellation is an expected outcome rather than an error condition.
 #[tauri::command]
 pub async fn open_file_dialog(
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<FileMetadata> {
+) -> Result<Option<FileMetadata>> {
     use tauri_plugin_dialog::DialogExt;
 
-    let path = app
+    let Some(path) = app
         .dialog()
         .file()
         .add_filter("Audio / Video", &["mp3", "mp4", "wav", "flac", "ogg", "aac", "m4a"])
         .blocking_pick_file()
-        .ok_or(AppError::DialogCancelled)?;
+    else {
+        return Ok(None);
+    };
 
     let path_str = path.to_string();
 
-    open_file(path_str, state).await
+    open_file(path_str, state).await.map(Some)
 }
 
 // ---------------------------------------------------------------------------
@@ -203,19 +208,23 @@ pub async fn validate_markers(state: State<'_, AppState>) -> Result<Vec<Segment>
 
 /// Open a CSV file dialog, parse the selected file, replace all current markers
 /// with the imported segments, and return the new marker list.
+///
+/// Returns `Ok(None)` when the user closes the dialog without picking a file.
 #[tauri::command]
 pub async fn import_csv(
     app: AppHandle,
     state: State<'_, AppState>,
-) -> Result<Vec<Marker>> {
+) -> Result<Option<Vec<Marker>>> {
     use tauri_plugin_dialog::DialogExt;
 
-    let path = app
+    let Some(path) = app
         .dialog()
         .file()
         .add_filter("CSV", &["csv"])
         .blocking_pick_file()
-        .ok_or(AppError::DialogCancelled)?;
+    else {
+        return Ok(None);
+    };
 
     let file = std::fs::File::open(path.to_string())?;
     let segments = import_markers_from_reader(file)?;
@@ -263,7 +272,7 @@ pub async fn import_csv(
         }
     }
 
-    Ok(store.list().to_vec())
+    Ok(Some(store.list().to_vec()))
 }
 
 // ---------------------------------------------------------------------------
@@ -272,14 +281,15 @@ pub async fn import_csv(
 
 /// Validate the current markers into segments, open a folder-picker dialog, then
 /// extract each segment from the loaded audio file using the bundled ffmpeg sidecar.
-/// Returns the number of segment files written.
+/// Returns the number of segment files written, or `Ok(None)` if the user
+/// cancelled the folder picker.
 #[tauri::command]
 pub async fn export_audio_segments(
     app: AppHandle,
     state: State<'_, AppState>,
     export_csv: bool, 
     export_audio: bool, 
-) -> Result<u32> {
+) -> Result<Option<u32>> {
     use tauri_plugin_dialog::DialogExt;
 
     let segments = state.markers.lock().to_segments()?;
@@ -292,17 +302,17 @@ pub async fn export_audio_segments(
         engine.as_ref().ok_or(AppError::NoFileLoaded)?.metadata.file_path.clone()
     };
 
-    let output_dir = app
-        .dialog()
-        .file()
-        .blocking_pick_folder()
-        .ok_or(AppError::DialogCancelled)?;
+    let Some(output_dir) = app.dialog().file().blocking_pick_folder() else {
+        return Ok(None);
+    };
 
     let output_path = output_dir
         .as_path()
         .ok_or_else(|| AppError::ValidationError("Invalid output directory path".into()))?;
 
-    export_segments(&app, &source_path, &segments, output_path, export_csv, export_audio).await
+    export_segments(&app, &source_path, &segments, output_path, export_csv, export_audio)
+        .await
+        .map(Some)
 }
 
 // ---------------------------------------------------------------------------

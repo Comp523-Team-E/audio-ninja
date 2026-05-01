@@ -115,9 +115,24 @@ describe('importCsv', () => {
   });
 
   it('does not set appState.error when dialog is cancelled', async () => {
-    mockIPC(() => { throw 'Dialog cancelled'; });
+    // Backend signals cancellation by resolving with `null` rather than rejecting.
+    mockIPC((cmd: string) => {
+      if (cmd === 'import_csv') return null;
+      return undefined;
+    });
     await importCsv();
     expect(appState.error).toBeNull();
+  });
+
+  it('leaves existing markers untouched when dialog is cancelled', async () => {
+    appState.markers = [marker('keep', 500, 'start')];
+    mockIPC((cmd: string) => {
+      if (cmd === 'import_csv') return null;
+      return undefined;
+    });
+    await importCsv();
+    expect(appState.markers).toHaveLength(1);
+    expect(appState.markers[0].id).toBe('keep');
   });
 
   it('sets appState.error on other failures', async () => {
