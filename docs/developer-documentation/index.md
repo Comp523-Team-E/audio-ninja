@@ -188,7 +188,8 @@ Maintenance note: the main export UI calls `export_audio_segments`, which can ex
 - Change marker or segment data shape: update `src-tauri/src/markers/model.rs`, `src/lib/types.ts`, CSV import/export code, and tests.
 - Change keyboard shortcuts: edit `src/lib/shortcuts.ts` and `src/components/ShortcutsPanel.svelte`.
 - Change where shortcuts are persisted: edit `read_shortcuts_config` and `write_shortcuts_config` in `src-tauri/src/commands.rs`.
-- Change supported input file types: update the dialog filter in `open_file_dialog` in `src-tauri/src/commands.rs`, confirm Symphonia supports the format, and update user-facing docs.
+- Change supported input file types: update the dialog filter in `open_file_dialog` in `src-tauri/src/commands.rs`, the matching `SUPPORTED_MEDIA_EXTENSIONS` constant in `src/lib/actions.ts`, confirm Symphonia supports the format, and update user-facing docs.
+- Change drag-and-drop behavior: edit the `onDragDropEvent` handler in `src/routes/+page.svelte` and `openFileFromPath` in `src/lib/actions.ts`.
 - Change audio decoding/playback behavior: start in `src-tauri/src/audio/engine.rs`, then inspect `decoder.rs`, `output.rs`, `control.rs`, and `resampler.rs`.
 - Change export filenames or FFmpeg arguments: edit `src-tauri/src/export/segments.rs`.
 - Change CSV format: edit `src-tauri/src/export/csv.rs`, update import/export tests, and update user documentation if the file format changes.
@@ -201,7 +202,7 @@ Maintenance note: the main export UI calls `export_audio_segments`, which can ex
 
 ### Opening a File
 
-`WelcomeScreen.svelte` or `Header.svelte` calls `openFile()` in `src/lib/actions.ts`. That invokes `open_file_dialog` in `src-tauri/src/commands.rs`. The backend opens a native dialog, constructs an `AudioEngine`, stores it in `AppState`, clears old markers, and returns file metadata to the frontend.
+`WelcomeScreen.svelte` or `Header.svelte` calls `openFile()` in `src/lib/actions.ts`. That invokes `open_file_dialog` in `src-tauri/src/commands.rs`. The backend opens a native dialog, constructs an `AudioEngine`, stores it in `AppState`, clears old markers, and returns file metadata to the frontend. Files dropped on the app window are handled by `src/routes/+page.svelte`, which listens for Tauri's `onDragDropEvent` and calls `openFileFromPath()` in `src/lib/actions.ts`; that path skips the dialog and invokes `open_file` directly with the dropped path.
 
 ### Playback and Seeking
 

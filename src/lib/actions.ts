@@ -217,6 +217,35 @@ export async function stepFwd() {
 
 // ── IPC handlers ──────────────────────────────────────────────────────────
 
+// Media extensions the backend's `open_file` command knows how to decode.
+// Keep in sync with the file-picker filter in `commands.rs::open_file_dialog`.
+export const SUPPORTED_MEDIA_EXTENSIONS = [
+  'mp3', 'mp4', 'wav', 'flac', 'ogg', 'aac', 'm4a',
+] as const;
+
+export function isSupportedMediaPath(path: string): boolean {
+  const dot = path.lastIndexOf('.');
+  if (dot < 0) return false;
+  const ext = path.slice(dot + 1).toLowerCase();
+  return (SUPPORTED_MEDIA_EXTENSIONS as readonly string[]).includes(ext);
+}
+
+// Apply the post-open state reset shared by every code path that loads a
+// fresh media file (file dialog, drag-and-drop, etc.).
+function applyLoadedMetadata(meta: FileMetadata) {
+  appState.metadata        = meta;
+  appState.durationMs      = meta.durationMs;
+  appState.positionMs      = 0;
+  appState.markers          = [];
+  appState.segments         = null;
+  appState.renameInputs     = {};
+  appState.selectedMarkerId = null;
+  appState.editingMarkerId  = null;
+  appState.editingPositionMs = 0;
+  startPolling();
+  startRaf();
+}
+
 export async function openFile() {
   try {
     appState.error = null;
@@ -225,17 +254,27 @@ export async function openFile() {
     // The backend returns `null` (Rust `Ok(None)`) when the user dismisses the
     // native file picker — treat that as a no-op rather than an error.
     if (meta == null) return;
-    appState.metadata        = meta;
-    appState.durationMs      = meta.durationMs;
-    appState.positionMs      = 0;
-    appState.markers          = [];
-    appState.segments         = null;
-    appState.renameInputs     = {};
-    appState.selectedMarkerId = null;
-    appState.editingMarkerId  = null;
-    appState.editingPositionMs = 0;
-    startPolling();
-    startRaf();
+    applyLoadedMetadata(meta);
+  } catch (e) {
+    appState.error = String(e);
+  }
+}
+
+/**
+ * Open a media file at the given absolute path (e.g. from a drag-and-drop).
+ * Silently ignores paths whose extension isn't in {@link SUPPORTED_MEDIA_EXTENSIONS}
+ * so that unrelated files dropped on the window don't trigger a backend error.
+ */
+export async function openFileFromPath(path: string) {
+  if (!isSupportedMediaPath(path)) {
+    appState.error = `Unsupported file type: ${path}`;
+    return;
+  }
+  try {
+    appState.error = null;
+    appState.successMessage = null;
+    const meta = await invoke<FileMetadata>('open_file', { path });
+    applyLoadedMetadata(meta);
   } catch (e) {
     appState.error = String(e);
   }
