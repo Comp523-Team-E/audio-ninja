@@ -75,7 +75,7 @@ The frontend lives in `src/`.
 - `src/lib/actions.ts` is the main frontend behavior layer. It handles polling playback position, requestAnimationFrame interpolation, keyboard shortcuts, seeking, file opening, marker operations, segment validation, CSV import, and export commands.
 - `src/lib/types.ts` defines frontend TypeScript interfaces that mirror serialized Rust data: file metadata, playback position, markers, marker kinds, and segments.
 - `src/lib/shortcuts.ts` defines available shortcut actions, default bindings, shortcut matching, and display formatting.
-- `src/lib/utils.ts` contains formatting and parsing helpers for timestamps, marker labels, playback speeds, and zoom levels.
+- `src/lib/utils.ts` contains formatting and parsing helpers for timestamps, marker labels, playback speeds, and zoom behavior.
 - `src/lib/validation.ts` maps backend validation error messages to affected marker IDs for UI highlighting.
 
 ### Frontend Tests
@@ -460,5 +460,3 @@ Use the Linux dependency list in `.github/workflows/ci.yml` and `.github/workflo
 - Keep generated files out of hand edits. Edit source files, then regenerate through normal build/test commands.
 - Update `README.md`, user docs, or developer docs whenever a user-visible workflow, install step, command, or supported file format changes.
 - When changing bundle behavior, test both `npm run tauri dev` and `npm run tauri build`.
-
-

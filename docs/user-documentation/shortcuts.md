@@ -26,8 +26,8 @@ The default shortcuts and keybindings provided within the app are as follows:
 | `3` | Set playback speed to 1× |
 | `4` | Set playback speed to 1.5× |
 | `5` | Set playback speed to 2× |
-| `-` | Zoom out |
-| `+` / `=` | Zoom in |
+| `-`, Pinch Apart, Scroll Up | Zoom out |
+| `+` / `=`, Pinch Together, Scroll Down | Zoom in |
 | `S` | Add start marker at current position |
 | `E` | Add end marker at current position |
 | `B` | Add start/end marker at current position |

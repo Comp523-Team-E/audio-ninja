@@ -1,13 +1,39 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { invoke, convertFileSrc } from '@tauri-apps/api/core';
   import WaveSurfer from 'wavesurfer.js';
   import { appState } from '$lib/state.svelte';
-  import { kindLabel, formatMs, ZOOM_LEVELS } from '$lib/utils';
+  import {
+    kindLabel,
+    formatMs,
+    formatMsDisplay,
+    ZOOM_DEFAULT,
+    maxZoomForDuration,
+    minZoomForDuration,
+    shouldHandleWheelZoom,
+    zoomFromWheelDelta,
+  } from '$lib/utils';
   import { validationProblemMarkerIds } from '$lib/validation';
-  import { moveEditingMarkerToMs } from '$lib/actions';
+  import { moveEditingMarkerToMs, setZoomLevel, zoomIn, zoomOut } from '$lib/actions';
 
   let waveformEl     = $state<HTMLDivElement | null>(null);
   let waveformWrapEl = $state<HTMLDivElement | null>(null);
+  let waveformResizeQueued = false;
+  let lastWaveformWidth = 0;
+  // The zoom level that WaveSurfer's canvas was last rendered at. While the
+  // user is mid-gesture (wheel/pinch zoom), we defer the (expensive) WaveSurfer
+  // re-render and instead CSS-scale the rendered canvas to match the current
+  // zoom — this keeps zooming smooth even at high zoom levels.
+  let lastRenderedZoom = $state(1);
+  let pendingZoomRenderTimer: ReturnType<typeof setTimeout> | null = null;
+  // While true, queueWaveformResize() will defer the WaveSurfer width update.
+  // CSS transform on .waveform-inner provides the visual zoom in the meantime.
+  let zoomRenderDeferred = false;
+  // ms of inactivity after the last zoom change before we trigger a re-render.
+  const ZOOM_RENDER_DEBOUNCE_MS = 120;
+  // If the displayed zoom drifts too far from the rendered zoom, force a
+  // re-render even mid-gesture so the waveform doesn't get unusably blurry.
+  const ZOOM_RENDER_MAX_RATIO = 2.5;
   const validationProblemIds = $derived(validationProblemMarkerIds(appState.markers, appState.validationError));
 
   // ── Timeline tick helpers ──────────────────────────────────────────────
@@ -52,9 +78,90 @@
   }
 
   const ticks = $derived(computeTicks(appState.durationMs, appState.zoomLevel));
+  const minZoomForFile = $derived(minZoomForDuration(appState.durationMs));
+  const maxZoomForFile = $derived(maxZoomForDuration(appState.durationMs));
+  const visibleWindowMs = $derived(appState.zoomLevel > 0 && appState.durationMs > 0
+    ? appState.durationMs / appState.zoomLevel
+    : 0);
+  const zoomWindowLabel = $derived(visibleWindowMs > 0 ? formatMsDisplay(visibleWindowMs, visibleWindowMs) : '0.000');
 
   // Expose the wrap element so external code can scroll it if needed
   $effect(() => { appState.waveformWrapEl = waveformWrapEl; });
+
+  function queueWaveformResize() {
+    if (waveformResizeQueued) return;
+    waveformResizeQueued = true;
+    requestAnimationFrame(() => {
+      waveformResizeQueued = false;
+      if (!appState.wavesurfer || !waveformEl || !appState.metadata) return;
+      // While a continuous zoom gesture is in flight, skip the expensive
+      // WaveSurfer re-render — the CSS transform on .waveform-inner handles
+      // the visual update. We'll re-render once the gesture settles.
+      if (zoomRenderDeferred) return;
+      const width = Math.round(waveformEl.clientWidth);
+      if (width > 0 && width !== lastWaveformWidth) {
+        lastWaveformWidth = width;
+        appState.wavesurfer.setOptions({ width });
+        lastRenderedZoom = appState.zoomLevel;
+      }
+    });
+  }
+
+  // Force a WaveSurfer re-render at the current zoom level, regardless of
+  // whether a zoom gesture is still in flight.
+  function flushWaveformResize() {
+    if (pendingZoomRenderTimer) {
+      clearTimeout(pendingZoomRenderTimer);
+      pendingZoomRenderTimer = null;
+    }
+    zoomRenderDeferred = false;
+    if (!appState.wavesurfer || !waveformEl || !appState.metadata) return;
+    const width = Math.round(waveformEl.clientWidth);
+    if (width > 0 && width !== lastWaveformWidth) {
+      lastWaveformWidth = width;
+      appState.wavesurfer.setOptions({ width });
+    }
+    lastRenderedZoom = appState.zoomLevel;
+  }
+
+  function scheduleDeferredZoomRender() {
+    if (pendingZoomRenderTimer) clearTimeout(pendingZoomRenderTimer);
+    pendingZoomRenderTimer = setTimeout(() => {
+      pendingZoomRenderTimer = null;
+      flushWaveformResize();
+    }, ZOOM_RENDER_DEBOUNCE_MS);
+  }
+
+  // Keep the waveform canvas width in sync with zoom width changes so
+  // the WaveSurfer render does not lag behind the timeline/markers.
+  // During continuous zoom gestures we debounce the (expensive) WaveSurfer
+  // re-render; the canvas is CSS-scaled in the meantime via the
+  // `--waveform-zoom-scale` custom property.
+  $effect(() => {
+    const zoomLevel = appState.zoomLevel;
+    const ws = appState.wavesurfer;
+    if (!ws || !waveformEl || !appState.metadata) return;
+    if (!zoomRenderDeferred) {
+      // Not currently in a deferred-render state. Re-render immediately.
+      queueWaveformResize();
+      return;
+    }
+    // Mid-gesture. If zoom drifts too far from the rendered baseline, the
+    // CSS-scaled waveform becomes unacceptably blurry/squashed — flush early.
+    const ratio = zoomLevel / lastRenderedZoom;
+    if (ratio >= ZOOM_RENDER_MAX_RATIO || ratio <= 1 / ZOOM_RENDER_MAX_RATIO) {
+      flushWaveformResize();
+    } else {
+      scheduleDeferredZoomRender();
+    }
+  });
+
+  // CSS scale factor applied to the WaveSurfer canvas while the renderer's
+  // baseline zoom is stale. This makes continuous zoom gestures feel
+  // instantaneous without forcing a redraw on every event.
+  const waveformZoomScale = $derived(
+    lastRenderedZoom > 0 ? appState.zoomLevel / lastRenderedZoom : 1,
+  );
 
   // Initialize (or reinitialize) WaveSurfer whenever the loaded file changes.
   // The cleanup function runs on component destroy or before re-running.
@@ -63,7 +170,10 @@
     if (!filePath || !waveformEl) return;
 
     // Reset zoom and scroll when a new file is loaded
-    appState.zoomLevel = 1;
+    appState.zoomLevel = Math.min(
+      Math.max(ZOOM_DEFAULT, minZoomForDuration(appState.durationMs)),
+      maxZoomForDuration(appState.durationMs),
+    );
     if (waveformWrapEl) waveformWrapEl.scrollLeft = 0;
 
     const ws = WaveSurfer.create({
@@ -81,6 +191,17 @@
     });
     ws.load(convertFileSrc(filePath));
     appState.wavesurfer = ws;
+    lastWaveformWidth = 0;
+    // Read zoom via untrack so this $effect doesn't depend on zoomLevel —
+    // otherwise every zoom change would tear down and recreate WaveSurfer
+    // and reset the zoom back to default.
+    lastRenderedZoom = untrack(() => appState.zoomLevel);
+    zoomRenderDeferred = false;
+    if (pendingZoomRenderTimer) {
+      clearTimeout(pendingZoomRenderTimer);
+      pendingZoomRenderTimer = null;
+    }
+    queueWaveformResize();
 
     const resizeObserver = new ResizeObserver(([entry]) => {
       const height = Math.round(entry.contentRect.height) - TIMELINE_HEIGHT;
@@ -90,6 +211,10 @@
 
     return () => {
       resizeObserver.disconnect();
+      if (pendingZoomRenderTimer) {
+        clearTimeout(pendingZoomRenderTimer);
+        pendingZoomRenderTimer = null;
+      }
       ws.destroy();
       appState.wavesurfer = null;
     };
@@ -106,16 +231,39 @@
     waveformWrapEl.scrollLeft = Math.max(0, pct * total - visible / 2);
   });
 
-  // ── Zoom controls ──────────────────────────────────────────────────────
-
-  function zoomIn() {
-    const i = ZOOM_LEVELS.indexOf(appState.zoomLevel);
-    if (i < ZOOM_LEVELS.length - 1) appState.zoomLevel = ZOOM_LEVELS[i + 1];
+  // ── Zoom controls / interactions ───────────────────────────────────────
+  async function handleWheelZoom(e: WheelEvent) {
+    if (!waveformWrapEl || !appState.metadata || appState.durationMs <= 0) return;
+    if (!shouldHandleWheelZoom({
+      deltaX: e.deltaX,
+      deltaY: e.deltaY,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+    })) return;
+    e.preventDefault();
+    // Mark this as a continuous gesture so the zoom $effect debounces the
+    // expensive WaveSurfer re-render and just CSS-scales mid-flight.
+    zoomRenderDeferred = true;
+    const nextZoom = zoomFromWheelDelta(
+      appState.zoomLevel,
+      e.deltaY,
+      appState.durationMs,
+      e.ctrlKey || e.metaKey
+    );
+    setZoomLevel(nextZoom);
   }
 
-  function zoomOut() {
-    const i = ZOOM_LEVELS.indexOf(appState.zoomLevel);
-    if (i > 0) appState.zoomLevel = ZOOM_LEVELS[i - 1];
+  function handleZoomInClick() {
+    // Discrete zoom: render immediately rather than waiting for a debounce.
+    zoomRenderDeferred = false;
+    zoomIn();
+    flushWaveformResize();
+  }
+
+  function handleZoomOutClick() {
+    zoomRenderDeferred = false;
+    zoomOut();
+    flushWaveformResize();
   }
 
   // ── Waveform drag seeking ──────────────────────────────────────────────
@@ -201,15 +349,15 @@
 <div class="zoom-controls">
   <button
     class="zoom-btn"
-    onclick={zoomOut}
-    disabled={!appState.metadata || appState.zoomLevel <= 1}
+    onclick={handleZoomOutClick}
+    disabled={!appState.metadata || appState.zoomLevel <= minZoomForFile}
     title="Zoom out"
   >−</button>
-  <span class="zoom-label">{appState.zoomLevel}x</span>
+  <span class="zoom-label">{zoomWindowLabel}s</span>
   <button
     class="zoom-btn"
-    onclick={zoomIn}
-    disabled={!appState.metadata || appState.zoomLevel >= 16}
+    onclick={handleZoomInClick}
+    disabled={!appState.metadata || appState.zoomLevel >= maxZoomForFile}
     title="Zoom in"
   >+</button>
 </div>
@@ -228,12 +376,18 @@
   onpointermove={handlePointerMove}
   onpointerup={handlePointerUp}
   onpointercancel={handlePointerUp}
+  onwheel={handleWheelZoom}
 >
   {#if appState.editingMarkerId}
     <div class="edit-mode-hint">Click to move marker · Enter to confirm · Esc to cancel</div>
   {/if}
   <div class="waveform-scroll" style="width: {appState.zoomLevel * 100}%">
-    <div class="waveform-inner" bind:this={waveformEl}></div>
+    <div
+      class="waveform-inner"
+      class:waveform-inner-scaled={waveformZoomScale !== 1}
+      style:--waveform-zoom-scale={waveformZoomScale}
+      bind:this={waveformEl}
+    ></div>
     <!-- Marker overlays — left: pct% is relative to waveform-scroll, same width as the waveform -->
     {#each appState.markers as m (m.id)}
       {@const isEditing = appState.editingMarkerId === m.id}
@@ -364,6 +518,16 @@
     width: 100%;
     flex: 1;
     min-height: 0;
+  }
+
+  /* During a continuous zoom gesture we defer the (expensive) WaveSurfer
+     re-render and instead CSS-scale the existing canvas so the waveform stays
+     aligned with the timeline & markers. The transform is horizontal-only with
+     a left origin so playhead/marker positions remain meaningful. */
+  .waveform-inner-scaled {
+    transform: scaleX(var(--waveform-zoom-scale, 1));
+    transform-origin: 0 0;
+    will-change: transform;
   }
 
   .timeline-ruler {

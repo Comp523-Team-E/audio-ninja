@@ -18,7 +18,7 @@ When the app is first opened the user is presented with a dialog that allows the
 
 ### Waveform Diagram
 
-The waveform diagram shows the user the waveform for their uploaded audio files. The user can zoom in on the waveform diagram using the shortcuts to place markers more precisely.
+The waveform diagram shows the user the waveform for their uploaded audio files. Users can zoom with `-` and `+` / `=`, or by scrolling or pinching over the waveform area, to place markers more precisely.
 
 Below the waveform diagram is a series of buttons for playing/pausing the audio, jumping forward/backward, and two toggles: loop and follow. The loop toggle, when enabled, will make the audio play on a loop. If the playhead reaches the end of the audio file it will automatically return to the start of the audio file and continue playing. The follow toggle forces the waveform diagram to move with the playhead (and vice versa) when the waveform is zoomed in. Both of these toggles default to being turned off. 
 
