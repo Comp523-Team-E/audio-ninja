@@ -4,8 +4,6 @@ use uuid::Uuid;
 pub enum AppError {
     #[error("No file loaded")]
     NoFileLoaded,
-    #[error("Seek out of range: {0} ms")]
-    SeekOutOfRange(u64),
     #[error("Marker not found: {0}")]
     MarkerNotFound(Uuid),
     #[error("Validation failed: {0}")]
@@ -48,7 +46,6 @@ mod tests {
 
         let cases: Vec<AppError> = vec![
             AppError::NoFileLoaded,
-            AppError::SeekOutOfRange(500),
             AppError::MarkerNotFound(uuid),
             AppError::ValidationError("bad input".into()),
             AppError::Io(io_err),

@@ -92,11 +92,8 @@ pub async fn pause(state: State<'_, AppState>) -> Result<()> {
 pub async fn seek(state: State<'_, AppState>, position_ms: u64) -> Result<()> {
     let engine = state.engine.lock();
     let engine = engine.as_ref().ok_or(AppError::NoFileLoaded)?;
-    let duration = engine.state.get_duration_ms() as u64;
-    if position_ms > duration {
-        return Err(AppError::SeekOutOfRange(position_ms));
-    }
-    engine.seek(position_ms)
+    let target = clamp_seek_to_duration(position_ms, engine.state.get_duration_ms());
+    engine.seek(target)
 }
 
 #[tauri::command]
@@ -352,4 +349,31 @@ fn parse_uuid(s: &str) -> Result<Uuid> {
     Uuid::parse_str(s).map_err(|_| {
         AppError::ValidationError(format!("Invalid UUID: {s}"))
     })
+}
+
+fn clamp_seek_to_duration(position_ms: u64, duration_ms: f64) -> u64 {
+    if duration_ms <= 0.0 {
+        return position_ms;
+    }
+    position_ms.min(duration_ms.floor() as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clamp_seek_to_duration;
+
+    #[test]
+    fn clamp_seek_allows_positions_with_unknown_duration() {
+        assert_eq!(clamp_seek_to_duration(5000, 0.0), 5000);
+    }
+
+    #[test]
+    fn clamp_seek_floors_fractional_duration_boundary() {
+        assert_eq!(clamp_seek_to_duration(5_039_334, 5_039_333.7), 5_039_333);
+    }
+
+    #[test]
+    fn clamp_seek_keeps_in_range_position() {
+        assert_eq!(clamp_seek_to_duration(1200, 5000.0), 1200);
+    }
 }
