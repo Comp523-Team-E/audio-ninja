@@ -20,6 +20,7 @@
   let waveformWrapEl = $state<HTMLDivElement | null>(null);
   let waveformResizeQueued = false;
   let lastWaveformWidth = 0;
+  let lastWaveformHeight = 0;
   // The zoom level that WaveSurfer's canvas was last rendered at. While the
   // user is mid-gesture (wheel/pinch zoom), we defer the (expensive) WaveSurfer
   // re-render and instead CSS-scale the rendered canvas to match the current
@@ -99,9 +100,18 @@
       // the visual update. We'll re-render once the gesture settles.
       if (zoomRenderDeferred) return;
       const width = Math.round(waveformEl.clientWidth);
+      const height = Math.round((waveformWrapEl?.clientHeight || 0) - TIMELINE_HEIGHT);
+      const options: { width?: number; height?: number } = {};
       if (width > 0 && width !== lastWaveformWidth) {
         lastWaveformWidth = width;
-        appState.wavesurfer.setOptions({ width });
+        options.width = width;
+      }
+      if (height > 0 && height !== lastWaveformHeight) {
+        lastWaveformHeight = height;
+        options.height = height;
+      }
+      if (options.width || options.height) {
+        appState.wavesurfer.setOptions(options);
         lastRenderedZoom = appState.zoomLevel;
       }
     });
@@ -117,9 +127,18 @@
     zoomRenderDeferred = false;
     if (!appState.wavesurfer || !waveformEl || !appState.metadata) return;
     const width = Math.round(waveformEl.clientWidth);
+    const height = Math.round((waveformWrapEl?.clientHeight || 0) - TIMELINE_HEIGHT);
+    const options: { width?: number; height?: number } = {};
     if (width > 0 && width !== lastWaveformWidth) {
       lastWaveformWidth = width;
-      appState.wavesurfer.setOptions({ width });
+      options.width = width;
+    }
+    if (height > 0 && height !== lastWaveformHeight) {
+      lastWaveformHeight = height;
+      options.height = height;
+    }
+    if (options.width || options.height) {
+      appState.wavesurfer.setOptions(options);
     }
     lastRenderedZoom = appState.zoomLevel;
   }
@@ -192,6 +211,7 @@
     ws.load(convertFileSrc(filePath));
     appState.wavesurfer = ws;
     lastWaveformWidth = 0;
+    lastWaveformHeight = 0;
     // Read zoom via untrack so this $effect doesn't depend on zoomLevel —
     // otherwise every zoom change would tear down and recreate WaveSurfer
     // and reset the zoom back to default.
@@ -203,9 +223,8 @@
     }
     queueWaveformResize();
 
-    const resizeObserver = new ResizeObserver(([entry]) => {
-      const height = Math.round(entry.contentRect.height) - TIMELINE_HEIGHT;
-      if (height > 0) ws.setOptions({ height });
+    const resizeObserver = new ResizeObserver(() => {
+      queueWaveformResize();
     });
     if (waveformWrapEl) resizeObserver.observe(waveformWrapEl);
 
@@ -428,7 +447,7 @@
         {/each}
         {#each ticks.major as tick (tick.pct)}
           <div class="tick-major" style="left: {tick.pct}%">
-            <span class="tick-label">{tick.label}</span>
+            <span class="tick-label" class:tick-label-right={tick.pct > 92}>{tick.label}</span>
           </div>
         {/each}
       </div>
@@ -560,6 +579,11 @@
     user-select: none;
     font-variant-numeric: tabular-nums;
     line-height: 1;
+  }
+
+  .tick-label-right {
+    left: auto;
+    right: 3px;
   }
 
   .tick-minor {
