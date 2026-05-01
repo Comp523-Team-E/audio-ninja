@@ -138,9 +138,18 @@ describe('openFile', () => {
   });
 
   it('sets appState.error when the dialog throws', async () => {
-    mockIPC(() => { throw new Error('cancelled'); });
+    mockIPC(() => { throw new Error('boom'); });
     await openFile();
-    expect(appState.error).toMatch('cancelled');
+    expect(appState.error).toMatch('boom');
+  });
+
+  it('does nothing when the dialog is cancelled (returns null)', async () => {
+    appState.metadata = null;
+    appState.error = null;
+    mockIPC(() => null);
+    await openFile();
+    expect(appState.metadata).toBeNull();
+    expect(appState.error).toBeNull();
   });
 });
 

@@ -18,9 +18,10 @@
       </svg>
     </div>
     <h2>Open a media file to begin</h2>
-    <p class="upload-formats">Supported formats: MP4, MP3, WAV, FLAC, OGG, AAC</p>
+    <p class="upload-formats">Supported formats: MP4, MP3, WAV, FLAC, OGG, AAC, M4A</p>
+    <p class="upload-hint">Drag &amp; drop a file anywhere, or</p>
     {#if appState.error}
-      <p class="error-text">{appState.error}</p>
+      <p class="error-text copyable-text">{appState.error}</p>
     {/if}
     <button class="btn-primary" onclick={onOpenFile}>Choose File</button>
   </div>
@@ -90,6 +91,12 @@
   .upload-formats {
     font-size: 12px;
     color: #8b949e;
+  }
+
+  .upload-hint {
+    font-size: 11px;
+    color: #6b7280;
+    margin-top: 2px;
   }
 
   .error-text {

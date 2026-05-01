@@ -255,22 +255,64 @@ export async function stepFwd() {
 
 // ── IPC handlers ──────────────────────────────────────────────────────────
 
+// Media extensions the backend's `open_file` command knows how to decode.
+// Keep in sync with the file-picker filter in `commands.rs::open_file_dialog`.
+export const SUPPORTED_MEDIA_EXTENSIONS = [
+  'mp3', 'mp4', 'wav', 'flac', 'ogg', 'aac', 'm4a',
+] as const;
+
+export function isSupportedMediaPath(path: string): boolean {
+  const dot = path.lastIndexOf('.');
+  if (dot < 0) return false;
+  const ext = path.slice(dot + 1).toLowerCase();
+  return (SUPPORTED_MEDIA_EXTENSIONS as readonly string[]).includes(ext);
+}
+
+// Apply the post-open state reset shared by every code path that loads a
+// fresh media file (file dialog, drag-and-drop, etc.).
+function applyLoadedMetadata(meta: FileMetadata) {
+  appState.metadata        = meta;
+  appState.durationMs      = meta.durationMs;
+  appState.positionMs      = 0;
+  appState.markers          = [];
+  appState.segments         = null;
+  appState.renameInputs     = {};
+  appState.selectedMarkerId = null;
+  appState.editingMarkerId  = null;
+  appState.editingPositionMs = 0;
+  startPolling();
+  startRaf();
+}
+
 export async function openFile() {
   try {
     appState.error = null;
     appState.successMessage = null;
-    const meta = await invoke<FileMetadata>('open_file_dialog');
-    appState.metadata        = meta;
-    appState.durationMs      = meta.durationMs;
-    appState.positionMs      = 0;
-    appState.markers          = [];
-    appState.segments         = null;
-    appState.renameInputs     = {};
-    appState.selectedMarkerId = null;
-    appState.editingMarkerId  = null;
-    appState.editingPositionMs = 0;
-    startPolling();
-    startRaf();
+    const meta = await invoke<FileMetadata | null>('open_file_dialog');
+    // The backend returns `null` (Rust `Ok(None)`) when the user dismisses the
+    // native file picker — treat that as a no-op rather than an error.
+    if (meta == null) return;
+    applyLoadedMetadata(meta);
+  } catch (e) {
+    appState.error = String(e);
+  }
+}
+
+/**
+ * Open a media file at the given absolute path (e.g. from a drag-and-drop).
+ * Silently ignores paths whose extension isn't in {@link SUPPORTED_MEDIA_EXTENSIONS}
+ * so that unrelated files dropped on the window don't trigger a backend error.
+ */
+export async function openFileFromPath(path: string) {
+  if (!isSupportedMediaPath(path)) {
+    appState.error = `Unsupported file type: ${path}`;
+    return;
+  }
+  try {
+    appState.error = null;
+    appState.successMessage = null;
+    const meta = await invoke<FileMetadata>('open_file', { path });
+    applyLoadedMetadata(meta);
   } catch (e) {
     appState.error = String(e);
   }
@@ -537,7 +579,8 @@ export async function exportAudioSegments(exportCsv: boolean, exportAudio: boole
   try {
     appState.error = null;
     appState.successMessage = null;
-    await invoke('export_audio_segments', {exportCsv, exportAudio});
+    const count = await invoke<number | null>('export_audio_segments', {exportCsv, exportAudio});
+    if (count === null) return; // user cancelled the folder picker
     if (exportCsv && exportAudio) appState.successMessage = 'CSV and audio segments exported successfully.';
     else if (exportCsv) appState.successMessage = 'CSV exported successfully.';
     else if (exportAudio) appState.successMessage = 'Audio segments exported successfully.';
@@ -550,7 +593,8 @@ export async function importCsv() {
   try {
     appState.error = null;
     appState.successMessage = null;
-    const markers = await invoke<Marker[]>('import_csv');
+    const markers = await invoke<Marker[] | null>('import_csv');
+    if (!markers) return; // user cancelled the file picker
     appState.markers = markers.sort((a, b) => a.position - b.position);
     appState.renameInputs = Object.fromEntries(
       markers.filter(m => m.kind !== 'end').map(m => [m.id, ''])
@@ -561,8 +605,6 @@ export async function importCsv() {
     appState.unkindedMarkers = new Set();
     await revalidate();
   } catch (e) {
-    if (String(e) !== 'Dialog cancelled') {
-      appState.error = String(e);
-    }
+    appState.error = String(e);
   }
 }

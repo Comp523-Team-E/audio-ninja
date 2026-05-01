@@ -18,8 +18,6 @@ pub enum AppError {
     AudioOutput(String),
     #[error("CSV error: {0}")]
     Csv(#[from] csv::Error),
-    #[error("Dialog cancelled")]
-    DialogCancelled,
     #[error("ffmpeg sidecar not available: {0}")]
     FfmpegNotFound(String),
     #[error("ffmpeg failed on segment '{0}': {1}")]
@@ -57,7 +55,6 @@ mod tests {
             AppError::Decode("corrupt".into()),
             AppError::AudioOutput("no device".into()),
             AppError::Csv(csv_err),
-            AppError::DialogCancelled,
             AppError::FfmpegNotFound("/usr/bin/ffmpeg".into()),
             AppError::FfmpegFailed("seg1".into(), "exit code 1".into()),
         ];

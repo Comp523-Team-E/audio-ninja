@@ -9,7 +9,7 @@
 
 ## Functionality 
 
-When the app is first opened the user is presented with a dialog that allows them to select an audio file. The supported audio file formats can be found [here](#supported-audio-file-formats). After the user has selected an audio file, they are presented with the application's main user interface. This interface has four main components:
+When the app is first opened the user is presented with a dialog that allows them to select an audio file, either by clicking the Choose File button or by dragging and dropping a file onto the app window. The supported audio file formats can be found [here](#supported-audio-file-formats). After the user has selected an audio file, they are presented with the application's main user interface. This interface has four main components:
 
 - [Waveform Diagram](#waveform-diagram)
 - [Marker List](#marker-list)
@@ -54,4 +54,4 @@ In addition to the base functionality listed above there are a few other feature
 
 The first feature we would like to highlight is that when users have finished placing their markers and are ready to export they can choose to either export the audio segments, the CSV with all of segments, or both. If the user chooses to export the CSV with all of their markers they will be able to pick up progress in another session by clicking the import CSV button in the top right and selecting the CSV file. 
 
-Users can also select the Open File button to import a new audio file and reset the applications state. Be weary that if a new audio file is opened without first exporting the current progress then that progress will not be saved. 
+Users can also select the Open File button, or drag and drop a new file onto the window, to import a new audio file and reset the applications state. Be weary that if a new audio file is opened without first exporting the current progress then that progress will not be saved. 
