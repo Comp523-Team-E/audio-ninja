@@ -19,7 +19,7 @@
     </div>
     <div class="alert-body">
       <p id="alert-title" class="alert-title">Error</p>
-      <p class="alert-message">{appState.error}</p>
+      <p class="alert-message copyable-text">{appState.error}</p>
     </div>
     <button class="btn-dismiss" onclick={dismiss}>OK</button>
   </div>
