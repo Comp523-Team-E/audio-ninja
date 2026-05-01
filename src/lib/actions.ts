@@ -193,16 +193,20 @@ export function centerWaveformAt(ms: number) {
 }
 
 export async function seekTo(ms: number, options: { centerWaveform?: boolean } = {}) {
+  const clampedMs = appState.durationMs > 0
+    ? Math.min(Math.max(ms, 0), appState.durationMs)
+    : Math.max(ms, 0);
+  const positionMs = Math.floor(clampedMs);
   try {
-    await invoke('seek', { positionMs: Math.round(ms) });
-    appState.positionMs     = ms;
-    appState.syncPositionMs = ms;
+    await invoke('seek', { positionMs });
+    appState.positionMs     = clampedMs;
+    appState.syncPositionMs = clampedMs;
     appState.syncWallTime   = performance.now();
     if (appState.wavesurfer && appState.durationMs > 0) {
-      appState.wavesurfer.setTime(ms / 1000);
+      appState.wavesurfer.setTime(clampedMs / 1000);
     }
     if (options.centerWaveform || appState.followPlayhead) {
-      centerWaveformAt(ms);
+      centerWaveformAt(clampedMs);
     }
   } catch (e) {
     appState.error = String(e);

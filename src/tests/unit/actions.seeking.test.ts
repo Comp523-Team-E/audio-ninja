@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mockIPC } from '@tauri-apps/api/mocks';
 import { appState } from '$lib/state.svelte';
-import { seekTo, selectMarker, seekToPrevMarker, seekToNextMarker, stepBack, stepFwd, handleFollowPlayhead } from '$lib/actions';
+import { seekTo, seekToEnd, selectMarker, seekToPrevMarker, seekToNextMarker, stepBack, stepFwd, handleFollowPlayhead } from '$lib/actions';
 import { resetAppState } from '../helpers/reset-state';
 import type { Marker } from '$lib/types';
 
@@ -21,11 +21,11 @@ describe('seekTo', () => {
     expect(appState.syncPositionMs).toBe(2500);
   });
 
-  it('sends the rounded position to invoke', async () => {
+  it('sends the floored position to invoke', async () => {
     const handler = vi.fn(() => undefined);
     mockIPC(handler);
     await seekTo(2500.7);
-    expect(handler).toHaveBeenCalledWith('seek', { positionMs: 2501 });
+    expect(handler).toHaveBeenCalledWith('seek', { positionMs: 2500 });
   });
 
   it('stores the unrounded value in state', async () => {
@@ -45,6 +45,15 @@ describe('seekTo', () => {
     mockIPC(() => { throw new Error('oops'); });
     await seekTo(5000);
     expect(appState.positionMs).toBe(1000);
+  });
+
+  it('does not round fractional durations past the end when seeking to end', async () => {
+    const handler = vi.fn(() => undefined);
+    mockIPC(handler);
+    appState.durationMs = 5_039_333.7;
+    await seekToEnd();
+    expect(handler).toHaveBeenCalledWith('seek', { positionMs: 5_039_333 });
+    expect(appState.positionMs).toBe(5_039_333.7);
   });
 });
 
